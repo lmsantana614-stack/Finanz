@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finanz Trading-Bot</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">₿</span>
+      <div>
+        <h1>Finanz Trading-Bot</h1>
+        <div class="sub" id="status">Starte …</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="btnRefresh">↻ Jetzt analysieren</button>
+      <button id="btnSettings" class="ghost">⚙ Einstellungen</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <main>
+    <section class="kpis">
+      <div class="kpi"><label>Depotwert</label><b id="kEquity">–</b><small id="kStart">Start: 50,00 €</small></div>
+      <div class="kpi"><label>Gewinn / Verlust</label><b id="kPnl">–</b><small id="kPnlPct">–</small></div>
+      <div class="kpi"><label>Bargeld</label><b id="kCash">–</b><small id="kPos">–</small></div>
+      <div class="kpi"><label>Abgeschl. Trades</label><b id="kTrades">–</b><small id="kWin">–</small></div>
+      <div class="kpi"><label>Marktstimmung</label><b id="kFng">–</b><small id="kNews">–</small></div>
+    </section>
+
+    <section class="card highlight">
+      <h2>🔔 Was der Bot jetzt kaufen würde</h2>
+      <div id="buyNow"></div>
+      <label class="switch"><input type="checkbox" id="autoTrade"> <span>Automatisch (Papier-)Handeln – der Bot führt seine Signale selbst mit dem virtuellen Guthaben aus</span></label>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Depotentwicklung</h2>
+        <div class="chartbox"><canvas id="equityChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Offene Positionen</h2>
+        <div id="positions"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Marktübersicht &amp; Signale</h2>
+      <p class="hint">Score = Kombination aus Trend, MACD, RSI, Bollinger, 24h-Momentum, News-Stimmung und Fear &amp; Greed. Ab <b>+35</b> → Kaufen, ab <b>−20</b> → Verkaufen. Klick auf eine Zeile zeigt Begründung &amp; Chart.</p>
+      <div class="tablewrap"><table id="market"><thead><tr>
+        <th>Coin</th><th>Kurs</th><th>24h</th><th>RSI</th><th>News</th><th>Score</th><th>Empfehlung</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div id="coinDetail" class="hidden">
+        <h3 id="cdTitle"></h3>
+        <ul id="cdReasons"></ul>
+        <div class="chartbox tall"><canvas id="coinChart"></canvas></div>
+        <div id="cdNews"></div>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Trade-Protokoll</h2>
+        <div id="trades" class="scroll"></div>
+      </div>
+      <div class="card">
+        <h2>Signal-Verlauf</h2>
+        <div id="signals" class="scroll"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>📰 Aktuelle Krypto-News (mit Stimmungsbewertung)</h2>
+      <div id="news" class="scroll"></div>
+    </section>
+
+    <section class="card">
+      <h2>🧪 Backtest – was wäre aus 50 € geworden?</h2>
+      <p class="hint">Testet dieselbe Strategie auf den letzten ~83 Tagen Stundenkursen (ohne News, die gibt es rückwirkend nicht). Vergangene Ergebnisse sind keine Garantie für die Zukunft.</p>
+      <button id="btnBacktest">Backtest starten</button>
+      <div id="btResult"></div>
+      <div class="chartbox"><canvas id="btChart"></canvas></div>
+    </section>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog">
+      <h2>Einstellungen</h2>
+      <label>Coins, die der Bot beobachtet</label>
+      <div id="coinPicker" class="coinpicker"></div>
+      <label>Analyse-Intervall
+        <select id="interval">
+          <option value="1">jede Minute</option>
+          <option value="5">alle 5 Minuten</option>
+          <option value="15">alle 15 Minuten</option>
+          <option value="60">jede Stunde</option>
+        </select>
+      </label>
+      <label class="switch"><input type="checkbox" id="notify"> <span>Browser-Benachrichtigung bei Kaufsignal</span></label>
+      <label class="switch"><input type="checkbox" id="sound"> <span>Ton bei Kaufsignal</span></label>
+      <label>CryptoCompare API-Key (optional, für höhere Limits)
+        <input type="text" id="apiKey" placeholder="leer lassen = ohne Key" autocomplete="off">
+      </label>
+      <hr>
+      <button type="button" id="btnReset" class="danger">Depot zurücksetzen (wieder 50 €)</button>
+      <button type="button" id="btnExport" class="ghost">Daten exportieren (JSON)</button>
+      <div class="dlgactions"><button value="ok">Speichern</button></div>
+    </form>
+  </dialog>
+
+  <div id="toasts"></div>
+
+  <footer>
+    <b>Hinweis:</b> Dies ist ein <b>Papier-Trading-Bot</b> – es wird kein echtes Geld bewegt. Die Signale sind automatisch berechnet und
+    <b>keine Anlageberatung</b>. Kryptowährungen sind hochriskant; ein Totalverlust ist möglich.
+    Der Bot rechnet nur, solange diese Seite geöffnet ist. Daten: CryptoCompare, CoinGecko, alternative.me.
+  </footer>
+
+  <script src="js/indicators.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/strategy.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
