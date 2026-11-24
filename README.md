@@ -19,7 +19,8 @@ Alle Daten werden im Browser gespeichert (localStorage). Der Bot rechnet nur, **
 
 ## Starten
 
-- **Lokal**: `index.html` im Browser öffnen, fertig. Es braucht keinen Server und keine Installation.
+- **Sofort**: `tradingbot.html` herunterladen und doppelklicken. Das ist eine einzelne Datei mit allem drin, sie braucht keinen Server und keine Installation (nur Internet für die Kurse).
+- **Lokal aus dem Repo**: `index.html` im Browser öffnen. Nach Änderungen an den Quelldateien mit `python3 build.py` die Einzeldatei neu bauen.
 - **Online über GitHub Pages**: Im Repo unter *Settings → Pages → Source* „GitHub Actions“ wählen. Jeder Push auf `main` veröffentlicht die Seite dann automatisch.
 
 ## Datenquellen (kostenlos)

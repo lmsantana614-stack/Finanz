@@ -1,0 +1,1197 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finanz Trading-Bot</title>
+  <style>
+:root {
+  --bg: #f4f6f9; --card: #ffffff; --text: #18202c; --muted: #6a7485; --border: #e1e6ee; --grid: #eef1f5;
+  --accent: #2f6fed; --accent-soft: rgba(47, 111, 237, .12); --c2: #e8a33d; --c3: #8a63d2;
+  --pos: #12a150; --neg: #d93f3f; --pos-soft: rgba(18, 161, 80, .12); --neg-soft: rgba(217, 63, 63, .12);
+  --hl: #fff8e6; --hl-border: #f1d58a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e131b; --card: #161d28; --text: #e6ebf2; --muted: #8e99ab; --border: #263042; --grid: #1f2836;
+    --accent: #5b8fff; --accent-soft: rgba(91, 143, 255, .15); --c2: #f0b45a; --c3: #a888e8;
+    --pos: #3ccf7c; --neg: #ff6b6b; --pos-soft: rgba(60, 207, 124, .15); --neg-soft: rgba(255, 107, 107, .15);
+    --hl: #1f1c12; --hl-border: #5c4a1c;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+.brand { display: flex; gap: 12px; align-items: center; }
+.logo { width: 40px; height: 40px; border-radius: 10px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 22px; font-weight: 700; }
+h1 { margin: 0; font-size: 19px; }
+h2 { margin: 0 0 12px; font-size: 16px; }
+h3 { font-size: 15px; margin: 18px 0 6px; }
+h4 { margin: 14px 0 6px; font-size: 14px; }
+.sub, .muted { color: var(--muted); }
+.small, small { font-size: 12px; }
+.big { font-size: 16px; }
+.actions { display: flex; gap: 8px; }
+button { font: inherit; border: 0; border-radius: 8px; padding: 8px 14px; background: var(--accent); color: #fff; cursor: pointer; font-weight: 600; }
+button:disabled { opacity: .6; cursor: wait; }
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+button.danger { background: var(--neg); }
+main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.card.highlight { background: var(--hl); border-color: var(--hl-border); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kpis.small { margin: 12px 0; }
+.kpi { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; }
+.kpi label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.kpi b { font-size: 22px; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.kpi small { color: var(--muted); }
+.pos { color: var(--pos); } .neg { color: var(--neg); }
+.hint { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
+.banner { max-width: 1200px; margin: 12px auto 0; padding: 10px 16px; border-radius: 10px; background: var(--hl); border: 1px solid var(--hl-border); font-size: 14px; }
+.banner.hidden, .hidden { display: none; }
+.warn { color: var(--neg); }
+
+.buycards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.buycard { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--pos); border-radius: 10px; padding: 12px; cursor: pointer; }
+.buycard ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.bc-head { display: flex; gap: 8px; align-items: baseline; }
+.bc-head span:not(.score) { color: var(--muted); font-size: 13px; flex: 1; }
+.bc-price { font-size: 18px; font-weight: 600; margin: 4px 0 6px; font-variant-numeric: tabular-nums; }
+.score { font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: 13px; }
+.s-buy { background: var(--pos-soft); color: var(--pos); }
+.tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--grid); color: var(--muted); }
+.tag.ok { background: var(--accent-soft); color: var(--accent); }
+.tag.buy { background: var(--pos-soft); color: var(--pos); font-weight: 600; }
+.switch { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; font-size: 14px; cursor: pointer; }
+.switch input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--accent); }
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+td { padding: 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; white-space: nowrap; }
+#market tbody tr { cursor: pointer; }
+#market tbody tr:hover, #market tbody tr.sel { background: var(--accent-soft); }
+.bar { position: relative; width: 90px; height: 8px; background: var(--grid); border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.bar span { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.bar .bp { background: var(--pos); } .bar .bn { background: var(--neg); }
+.act { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; letter-spacing: .03em; }
+.act.buy { background: var(--pos-soft); color: var(--pos); }
+.act.sell { background: var(--neg-soft); color: var(--neg); }
+.act.hold { background: var(--grid); color: var(--muted); }
+
+.chartbox { position: relative; height: 240px; }
+.chartbox.tall { height: 300px; }
+.scroll { max-height: 380px; overflow-y: auto; }
+.logrow { padding: 8px 0; border-bottom: 1px solid var(--grid); font-size: 14px; }
+.logrow small { float: right; }
+#cdReasons { margin: 0 0 10px; padding-left: 20px; }
+.news { display: flex; gap: 10px; padding: 8px 6px; border-bottom: 1px solid var(--grid); color: var(--text); text-decoration: none; font-size: 14px; }
+.news:hover { background: var(--grid); }
+.nscore { width: 18px; flex: none; text-align: center; color: var(--muted); }
+.npos .nscore { color: var(--pos); } .nneg .nscore { color: var(--neg); }
+
+dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--text); width: min(520px, calc(100% - 32px)); padding: 20px; }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog label { display: block; margin: 12px 0 4px; font-size: 14px; }
+dialog input[type=text], dialog select { width: 100%; padding: 8px; margin-top: 4px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; }
+dialog hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+dialog .danger, dialog .ghost { margin: 0 6px 6px 0; }
+.coinpicker { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex !important; gap: 4px; align-items: center; margin: 0 !important; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px !important; cursor: pointer; }
+.chip small { color: var(--muted); }
+.dlgactions { text-align: right; margin-top: 12px; }
+
+#toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: calc(100% - 32px); }
+.toast { background: var(--text); color: var(--bg); padding: 10px 14px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); font-size: 14px; max-width: 420px; }
+.toast.buy { background: var(--pos); color: #fff; }
+.toast.sell { background: var(--neg); color: #fff; }
+
+footer { max-width: 1200px; margin: 8px auto 32px; padding: 0 16px; color: var(--muted); font-size: 13px; }
+@media (max-width: 600px) {
+  header { padding: 12px 16px; }
+  main { padding: 12px 16px; }
+  .kpi b { font-size: 19px; }
+}
+</style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">₿</span>
+      <div>
+        <h1>Finanz Trading-Bot</h1>
+        <div class="sub" id="status">Starte …</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="btnRefresh">↻ Jetzt analysieren</button>
+      <button id="btnSettings" class="ghost">⚙ Einstellungen</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <main>
+    <section class="kpis">
+      <div class="kpi"><label>Depotwert</label><b id="kEquity">–</b><small id="kStart">Start: 50,00 €</small></div>
+      <div class="kpi"><label>Gewinn / Verlust</label><b id="kPnl">–</b><small id="kPnlPct">–</small></div>
+      <div class="kpi"><label>Bargeld</label><b id="kCash">–</b><small id="kPos">–</small></div>
+      <div class="kpi"><label>Abgeschl. Trades</label><b id="kTrades">–</b><small id="kWin">–</small></div>
+      <div class="kpi"><label>Marktstimmung</label><b id="kFng">–</b><small id="kNews">–</small></div>
+    </section>
+
+    <section class="card highlight">
+      <h2>🔔 Was der Bot jetzt kaufen würde</h2>
+      <div id="buyNow"></div>
+      <label class="switch"><input type="checkbox" id="autoTrade"> <span>Automatisch (Papier-)Handeln – der Bot führt seine Signale selbst mit dem virtuellen Guthaben aus</span></label>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Depotentwicklung</h2>
+        <div class="chartbox"><canvas id="equityChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Offene Positionen</h2>
+        <div id="positions"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Marktübersicht &amp; Signale</h2>
+      <p class="hint">Score = Kombination aus Trend, MACD, RSI, Bollinger, 24h-Momentum, News-Stimmung und Fear &amp; Greed. Ab <b>+35</b> → Kaufen, ab <b>−20</b> → Verkaufen. Klick auf eine Zeile zeigt Begründung &amp; Chart.</p>
+      <div class="tablewrap"><table id="market"><thead><tr>
+        <th>Coin</th><th>Kurs</th><th>24h</th><th>RSI</th><th>News</th><th>Score</th><th>Empfehlung</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div id="coinDetail" class="hidden">
+        <h3 id="cdTitle"></h3>
+        <ul id="cdReasons"></ul>
+        <div class="chartbox tall"><canvas id="coinChart"></canvas></div>
+        <div id="cdNews"></div>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Trade-Protokoll</h2>
+        <div id="trades" class="scroll"></div>
+      </div>
+      <div class="card">
+        <h2>Signal-Verlauf</h2>
+        <div id="signals" class="scroll"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>📰 Aktuelle Krypto-News (mit Stimmungsbewertung)</h2>
+      <div id="news" class="scroll"></div>
+    </section>
+
+    <section class="card">
+      <h2>🧪 Backtest – was wäre aus 50 € geworden?</h2>
+      <p class="hint">Testet dieselbe Strategie auf den letzten ~83 Tagen Stundenkursen (ohne News, die gibt es rückwirkend nicht). Vergangene Ergebnisse sind keine Garantie für die Zukunft.</p>
+      <button id="btnBacktest">Backtest starten</button>
+      <div id="btResult"></div>
+      <div class="chartbox"><canvas id="btChart"></canvas></div>
+    </section>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog">
+      <h2>Einstellungen</h2>
+      <label>Coins, die der Bot beobachtet</label>
+      <div id="coinPicker" class="coinpicker"></div>
+      <label>Analyse-Intervall
+        <select id="interval">
+          <option value="1">jede Minute</option>
+          <option value="5">alle 5 Minuten</option>
+          <option value="15">alle 15 Minuten</option>
+          <option value="60">jede Stunde</option>
+        </select>
+      </label>
+      <label class="switch"><input type="checkbox" id="notify"> <span>Browser-Benachrichtigung bei Kaufsignal</span></label>
+      <label class="switch"><input type="checkbox" id="sound"> <span>Ton bei Kaufsignal</span></label>
+      <label>CryptoCompare API-Key (optional, für höhere Limits)
+        <input type="text" id="apiKey" placeholder="leer lassen = ohne Key" autocomplete="off">
+      </label>
+      <hr>
+      <button type="button" id="btnReset" class="danger">Depot zurücksetzen (wieder 50 €)</button>
+      <button type="button" id="btnExport" class="ghost">Daten exportieren (JSON)</button>
+      <div class="dlgactions"><button value="ok">Speichern</button></div>
+    </form>
+  </dialog>
+
+  <div id="toasts"></div>
+
+  <footer>
+    <b>Hinweis:</b> Dies ist ein <b>Papier-Trading-Bot</b> – es wird kein echtes Geld bewegt. Die Signale sind automatisch berechnet und
+    <b>keine Anlageberatung</b>. Kryptowährungen sind hochriskant; ein Totalverlust ist möglich.
+    Der Bot rechnet nur, solange diese Seite geöffnet ist. Daten: CryptoCompare, CoinGecko, alternative.me.
+  </footer>
+
+  <script>
+// Technische Indikatoren – reine Funktionen auf Arrays von Schlusskursen.
+const Ind = {
+  sma(arr, n) {
+    const out = new Array(arr.length).fill(null);
+    let sum = 0;
+    for (let i = 0; i < arr.length; i++) {
+      sum += arr[i];
+      if (i >= n) sum -= arr[i - n];
+      if (i >= n - 1) out[i] = sum / n;
+    }
+    return out;
+  },
+
+  ema(arr, n) {
+    const out = new Array(arr.length).fill(null);
+    if (arr.length < n) return out;
+    const k = 2 / (n + 1);
+    let prev = arr.slice(0, n).reduce((a, b) => a + b, 0) / n;
+    out[n - 1] = prev;
+    for (let i = n; i < arr.length; i++) {
+      prev = arr[i] * k + prev * (1 - k);
+      out[i] = prev;
+    }
+    return out;
+  },
+
+  // RSI nach Wilder
+  rsi(arr, n = 14) {
+    const out = new Array(arr.length).fill(null);
+    if (arr.length <= n) return out;
+    let gain = 0, loss = 0;
+    for (let i = 1; i <= n; i++) {
+      const d = arr[i] - arr[i - 1];
+      if (d >= 0) gain += d; else loss -= d;
+    }
+    gain /= n; loss /= n;
+    out[n] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+    for (let i = n + 1; i < arr.length; i++) {
+      const d = arr[i] - arr[i - 1];
+      gain = (gain * (n - 1) + Math.max(d, 0)) / n;
+      loss = (loss * (n - 1) + Math.max(-d, 0)) / n;
+      out[i] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+    }
+    return out;
+  },
+
+  macd(arr, fast = 12, slow = 26, signal = 9) {
+    const ef = Ind.ema(arr, fast), es = Ind.ema(arr, slow);
+    const line = arr.map((_, i) => (ef[i] != null && es[i] != null ? ef[i] - es[i] : null));
+    const start = line.findIndex((v) => v != null);
+    const sig = new Array(arr.length).fill(null);
+    if (start >= 0) {
+      const e = Ind.ema(line.slice(start), signal);
+      e.forEach((v, j) => (sig[start + j] = v));
+    }
+    const hist = line.map((v, i) => (v != null && sig[i] != null ? v - sig[i] : null));
+    return { line, signal: sig, hist };
+  },
+
+  bollinger(arr, n = 20, mult = 2) {
+    const mid = Ind.sma(arr, n);
+    const upper = [], lower = [];
+    for (let i = 0; i < arr.length; i++) {
+      if (mid[i] == null) { upper.push(null); lower.push(null); continue; }
+      let s = 0;
+      for (let j = i - n + 1; j <= i; j++) s += (arr[j] - mid[i]) ** 2;
+      const sd = Math.sqrt(s / n);
+      upper.push(mid[i] + mult * sd);
+      lower.push(mid[i] - mult * sd);
+    }
+    return { mid, upper, lower };
+  },
+};
+</script>
+  <script>
+// Datenquellen: Kurse, News und Marktstimmung (alle kostenlos & CORS-fähig).
+const COINS = {
+  BTC: { name: 'Bitcoin', gecko: 'bitcoin', aliases: ['bitcoin', 'btc'] },
+  ETH: { name: 'Ethereum', gecko: 'ethereum', aliases: ['ethereum', 'eth', 'ether'] },
+  SOL: { name: 'Solana', gecko: 'solana', aliases: ['solana', 'sol'] },
+  XRP: { name: 'XRP', gecko: 'ripple', aliases: ['xrp', 'ripple'] },
+  ADA: { name: 'Cardano', gecko: 'cardano', aliases: ['cardano', 'ada'] },
+  DOGE: { name: 'Dogecoin', gecko: 'dogecoin', aliases: ['dogecoin', 'doge'] },
+  AVAX: { name: 'Avalanche', gecko: 'avalanche-2', aliases: ['avalanche', 'avax'] },
+  LINK: { name: 'Chainlink', gecko: 'chainlink', aliases: ['chainlink', 'link'] },
+  DOT: { name: 'Polkadot', gecko: 'polkadot', aliases: ['polkadot', 'dot'] },
+  BNB: { name: 'BNB', gecko: 'binancecoin', aliases: ['bnb', 'binance coin'] },
+};
+
+const Data = {
+  async getJSON(url, timeoutMs = 15000) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    } finally {
+      clearTimeout(t);
+    }
+  },
+
+  // Stündliche Kerzen in EUR -> [{t (ms), c, h, l, v}]
+  async candles(sym, limit, apiKey) {
+    const key = apiKey ? `&api_key=${encodeURIComponent(apiKey)}` : '';
+    try {
+      const j = await Data.getJSON(
+        `https://min-api.cryptocompare.com/data/v2/histohour?fsym=${sym}&tsym=EUR&limit=${Math.min(limit, 2000)}${key}`
+      );
+      if (j.Response !== 'Success' || !j.Data || !Array.isArray(j.Data.Data)) throw new Error(j.Message || 'CryptoCompare-Fehler');
+      const rows = j.Data.Data.filter((d) => d.close > 0).map((d) => ({ t: d.time * 1000, c: d.close, h: d.high, l: d.low, v: d.volumeto }));
+      if (rows.length < 60) throw new Error('zu wenige Daten');
+      return { rows, source: 'CryptoCompare' };
+    } catch (e) {
+      // Fallback: CoinGecko (stündliche Auflösung bei 2–90 Tagen)
+      const days = Math.max(2, Math.min(90, Math.ceil(limit / 24)));
+      const j = await Data.getJSON(
+        `https://api.coingecko.com/api/v3/coins/${COINS[sym].gecko}/market_chart?vs_currency=eur&days=${days}`
+      );
+      if (!j.prices || !j.prices.length) throw new Error(`Keine Kurse für ${sym}`);
+      const rows = j.prices.map(([t, p]) => ({ t, c: p, h: p, l: p, v: 0 }));
+      return { rows, source: 'CoinGecko' };
+    }
+  },
+
+  // Krypto-News -> [{t, title, body, url, source, tags}]
+  async news(apiKey) {
+    const key = apiKey ? `&api_key=${encodeURIComponent(apiKey)}` : '';
+    const j = await Data.getJSON(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN${key}`);
+    if (!Array.isArray(j.Data)) throw new Error(j.Message || 'News nicht verfügbar');
+    return j.Data.map((n) => ({
+      t: n.published_on * 1000,
+      title: n.title || '',
+      body: (n.body || '').slice(0, 400),
+      url: n.url || n.guid,
+      source: (n.source_info && n.source_info.name) || n.source || '',
+      tags: ((n.categories || '') + '|' + (n.tags || '')).toUpperCase(),
+    }));
+  },
+
+  // Crypto Fear & Greed Index (0 = extreme Angst, 100 = extreme Gier)
+  async fearGreed() {
+    const j = await Data.getJSON('https://api.alternative.me/fng/?limit=1');
+    const d = j.data && j.data[0];
+    if (!d) throw new Error('kein F&G');
+    return { value: Number(d.value), label: d.value_classification };
+  },
+
+  // Synthetische Daten für den Demo-Modus (wenn APIs nicht erreichbar sind)
+  demoCandles(sym, limit) {
+    let seed = [...sym].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) >>> 0;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const base = { BTC: 80000, ETH: 3000, SOL: 150, XRP: 2, ADA: 0.7, DOGE: 0.18, AVAX: 30, LINK: 15, DOT: 6, BNB: 600 }[sym] || 10;
+    const now = Math.floor(Date.now() / 3600000) * 3600000;
+    let p = base, drift = 0;
+    const rows = [];
+    for (let i = limit - 1; i >= 0; i--) {
+      if (rnd() < 0.02) drift = (rnd() - 0.5) * 0.004; // Regimewechsel
+      const g = (rnd() + rnd() + rnd() - 1.5) * 0.012;
+      p *= 1 + drift + g;
+      rows.push({ t: now - i * 3600000, c: p, h: p * 1.003, l: p * 0.997, v: 0 });
+    }
+    return { rows, source: 'Demo' };
+  },
+};
+</script>
+  <script>
+// Strategie: technische Analyse + News-Stimmung + Fear & Greed -> Score -> Entscheidungen.
+
+const CONFIG = {
+  buyThreshold: 35,    // Score ab dem gekauft wird
+  sellThreshold: -20,  // Score ab dem eine Position verkauft wird
+  stopLoss: 0.06,      // -6 % -> raus
+  takeProfit: 0.15,    // +15 % -> Gewinne sichern
+  trailStart: 0.05,    // ab +5 % Gewinn wird ein Trailing-Stop aktiv …
+  trailPct: 0.04,      // … der 4 % unter dem Höchststand liegt
+  maxPosPct: 0.35,     // max. 35 % des Depots pro Position
+  maxPositions: 3,
+  fee: 0.001,          // 0,1 % Gebühr pro Trade (realistisch für Kryptobörsen)
+  minOrder: 5,         // Mindestorder in €
+  cooldownH: 6,        // nach einem Verkauf 6 h kein Wiedereinstieg in denselben Coin
+};
+
+const POS_WORDS = ['surge', 'surges', 'soar', 'soars', 'rally', 'rallies', 'bull', 'bullish', 'gain', 'gains', 'jump', 'jumps',
+  'record', 'all-time high', 'ath', 'approval', 'approved', 'approves', 'adoption', 'partnership', 'partners', 'upgrade',
+  'launch', 'launches', 'inflow', 'inflows', 'breakout', 'rebound', 'recover', 'recovers', 'recovery', 'climb', 'climbs',
+  'buy', 'buys', 'accumulate', 'accumulation', 'optimism', 'optimistic', 'outperform', 'boost', 'boosts', 'milestone',
+  'integration', 'institutional', 'rate cut', 'skyrocket', 'spike'];
+const NEG_WORDS = ['crash', 'crashes', 'plunge', 'plunges', 'bear', 'bearish', 'drop', 'drops', 'fall', 'falls', 'slump',
+  'hack', 'hacked', 'exploit', 'exploited', 'lawsuit', 'sue', 'sues', 'ban', 'bans', 'fraud', 'outflow', 'outflows',
+  'sell-off', 'selloff', 'liquidation', 'liquidations', 'dump', 'dumps', 'decline', 'declines', 'warning', 'warns', 'scam',
+  'bankrupt', 'bankruptcy', 'investigation', 'delist', 'delisting', 'tumble', 'tumbles', 'fear', 'sink', 'sinks',
+  'rate hike', 'crackdown', 'loss', 'losses', 'collapse', 'vulnerability', 'stolen'];
+const RED_FLAGS = ['hack', 'hacked', 'exploit', 'exploited', 'stolen', 'delist', 'delisting', 'bankrupt', 'bankruptcy', 'fraud', 'charges', 'collapse'];
+
+function countWords(text, words) {
+  let n = 0;
+  for (const w of words) {
+    const re = new RegExp(`\\b${w.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
+    if (re.test(text)) n++;
+  }
+  return n;
+}
+
+const Strategy = {
+  // Stimmung einer einzelnen Schlagzeile, -1 … +1
+  headlineScore(item) {
+    const text = `${item.title} ${item.title} ${item.body}`; // Titel doppelt gewichtet
+    const p = countWords(text, POS_WORDS), n = countWords(text, NEG_WORDS);
+    if (p + n === 0) return 0;
+    return (p - n) / (p + n);
+  },
+
+  mentions(item, sym) {
+    if (item.tags.split('|').includes(sym)) return true;
+    return COINS[sym].aliases.some((a) => new RegExp(`\\b${a}\\b`, 'i').test(item.title));
+  },
+
+  // News für alle Coins auswerten
+  analyzeNews(news, symbols, now = Date.now()) {
+    const recent = news.filter((n) => now - n.t < 36 * 3600e3);
+    const weighted = (items) => {
+      let s = 0, w = 0;
+      for (const it of items) {
+        const age = (now - it.t) / 3600e3;
+        const wt = Math.exp(-age / 12);
+        s += wt * it.score; w += wt;
+      }
+      return w ? s / w : 0;
+    };
+    recent.forEach((n) => (n.score = Strategy.headlineScore(n)));
+    const market = weighted(recent);
+    const perCoin = {};
+    for (const sym of symbols) {
+      const items = recent.filter((n) => Strategy.mentions(n, sym));
+      const conf = Math.min(1, items.length / 3); // wenige Meldungen = weniger Gewicht
+      const redFlag = items.find((n) => now - n.t < 12 * 3600e3 && countWords(n.title, RED_FLAGS) > 0);
+      perCoin[sym] = {
+        score: weighted(items) * conf,
+        count: items.length,
+        redFlag: redFlag ? redFlag.title : null,
+        headlines: items.slice(0, 5),
+      };
+    }
+    return { market, perCoin, count: recent.length };
+  },
+
+  // Bewertung eines Coins. closes = Schlusskurse bis "jetzt".
+  // ctx = { news: {score, count, redFlag}, market: -1..1, fng: 0..100|null }
+  evaluate(closes, ctx = {}) {
+    const i = closes.length - 1;
+    const reasons = [];
+    let score = 0;
+    if (closes.length < 60) return { score: 0, action: 'HALTEN', reasons: ['Zu wenige Kursdaten'], ind: {} };
+
+    const price = closes[i];
+    const ema20 = Ind.ema(closes, 20)[i];
+    const ema50 = Ind.ema(closes, 50)[i];
+    const rsi = Ind.rsi(closes, 14)[i];
+    const m = Ind.macd(closes);
+    const hist = m.hist[i], histPrev = m.hist[i - 1];
+    const bb = Ind.bollinger(closes, 20, 2);
+    const mom24 = closes.length > 24 ? (price / closes[i - 24] - 1) * 100 : 0;
+
+    // 1) Trend
+    if (price > ema50 && ema20 > ema50) { score += 20; reasons.push('Aufwärtstrend (Kurs > EMA50, EMA20 > EMA50)'); }
+    else if (price < ema50 && ema20 < ema50) { score -= 20; reasons.push('Abwärtstrend (Kurs < EMA50)'); }
+
+    // 2) MACD-Momentum
+    if (hist != null && histPrev != null) {
+      if (hist > 0 && hist > histPrev) { score += 15; reasons.push('MACD steigt (positives Momentum)'); }
+      else if (hist < 0 && hist < histPrev) { score -= 15; reasons.push('MACD fällt (negatives Momentum)'); }
+      else if (histPrev < 0 && hist > 0) { score += 10; reasons.push('MACD-Kreuzung nach oben'); }
+    }
+
+    // 3) RSI
+    if (rsi < 30) { score += 25; reasons.push(`RSI ${rsi.toFixed(0)} – überverkauft`); }
+    else if (rsi < 45) { score += 8; reasons.push(`RSI ${rsi.toFixed(0)} – günstig`); }
+    else if (rsi > 75) { score -= 25; reasons.push(`RSI ${rsi.toFixed(0)} – stark überkauft`); }
+    else if (rsi > 65) { score -= 10; reasons.push(`RSI ${rsi.toFixed(0)} – überkauft`); }
+
+    // 4) Bollinger-Bänder
+    if (bb.lower[i] != null && price < bb.lower[i]) { score += 10; reasons.push('Kurs unter unterem Bollinger-Band'); }
+    else if (bb.upper[i] != null && price > bb.upper[i]) { score -= 10; reasons.push('Kurs über oberem Bollinger-Band'); }
+
+    // 5) 24h-Momentum
+    const momPts = Math.max(-15, Math.min(15, mom24 * 2));
+    score += momPts;
+    if (Math.abs(mom24) >= 2) reasons.push(`24h: ${mom24 > 0 ? '+' : ''}${mom24.toFixed(1)} %`);
+
+    // 6) News zum Coin
+    if (ctx.news && ctx.news.count) {
+      const pts = ctx.news.score * 30;
+      score += pts;
+      if (Math.abs(pts) >= 3) reasons.push(`News ${pts > 0 ? 'positiv' : 'negativ'} (${ctx.news.count} Meldungen)`);
+    }
+    // 7) Allgemeine Marktnachrichten
+    if (ctx.market) {
+      const pts = ctx.market * 10;
+      score += pts;
+      if (Math.abs(pts) >= 3) reasons.push(`Marktnachrichten ${pts > 0 ? 'positiv' : 'negativ'}`);
+    }
+    // 8) Fear & Greed (antizyklisch: kaufen wenn andere Angst haben)
+    if (ctx.fng != null) {
+      const pts = ((50 - ctx.fng) / 50) * 10;
+      score += pts;
+      if (ctx.fng <= 25) reasons.push(`Extreme Angst im Markt (${ctx.fng}) – antizyklische Chance`);
+      if (ctx.fng >= 75) reasons.push(`Extreme Gier im Markt (${ctx.fng}) – Vorsicht`);
+    }
+
+    let action = 'HALTEN';
+    if (score >= CONFIG.buyThreshold) action = 'KAUFEN';
+    else if (score <= CONFIG.sellThreshold) action = 'VERKAUFEN';
+
+    // Warn-News blockieren Käufe
+    if (ctx.news && ctx.news.redFlag) {
+      score -= 40;
+      action = 'VERKAUFEN';
+      reasons.unshift(`⚠ Warn-Meldung: „${ctx.news.redFlag}“`);
+    }
+
+    return { score: Math.round(score), action, reasons, ind: { price, ema20, ema50, rsi, mom24 } };
+  },
+};
+
+// Portfolio-Logik – identisch für Live-Betrieb und Backtest.
+const Engine = {
+  newPortfolio(capital) {
+    return { cash: capital, positions: {}, trades: [], lastSell: {} };
+  },
+
+  equity(pf, prices) {
+    let v = pf.cash;
+    for (const [s, p] of Object.entries(pf.positions)) v += p.qty * (prices[s] || p.avgPrice);
+    return v;
+  },
+
+  // Liefert Liste von Orders {side, sym, eur|qty, reason}
+  decide(pf, evals, prices, now) {
+    const orders = [];
+    // Verkäufe zuerst
+    for (const [sym, pos] of Object.entries(pf.positions)) {
+      const price = prices[sym];
+      if (!price) continue;
+      pos.peak = Math.max(pos.peak || pos.avgPrice, price);
+      const pnl = price / pos.avgPrice - 1;
+      const peakGain = pos.peak / pos.avgPrice - 1;
+      const ev = evals[sym];
+      let reason = null;
+      if (pnl <= -CONFIG.stopLoss) reason = `Stop-Loss (${(pnl * 100).toFixed(1)} %)`;
+      else if (pnl >= CONFIG.takeProfit) reason = `Gewinnmitnahme (+${(pnl * 100).toFixed(1)} %)`;
+      else if (peakGain >= CONFIG.trailStart && price <= pos.peak * (1 - CONFIG.trailPct)) reason = `Trailing-Stop (${(pnl * 100).toFixed(1)} %)`;
+      else if (ev && ev.action === 'VERKAUFEN') reason = `Verkaufssignal (Score ${ev.score}): ${ev.reasons[0] || ''}`;
+      if (reason) orders.push({ side: 'SELL', sym, qty: pos.qty, reason });
+    }
+
+    // Käufe
+    const selling = new Set(orders.map((o) => o.sym));
+    let cash = pf.cash + orders.reduce((a, o) => a + o.qty * prices[o.sym] * (1 - CONFIG.fee), 0);
+    let nPos = Object.keys(pf.positions).length - selling.size;
+    const equity = Engine.equity(pf, prices);
+    const cands = Object.entries(evals)
+      .filter(([sym, ev]) => ev.action === 'KAUFEN' && !pf.positions[sym] && !selling.has(sym))
+      .filter(([sym]) => !pf.lastSell[sym] || now - pf.lastSell[sym] > CONFIG.cooldownH * 3600e3)
+      .sort((a, b) => b[1].score - a[1].score);
+    for (const [sym, ev] of cands) {
+      if (nPos >= CONFIG.maxPositions) break;
+      const amount = Engine.suggestAmount(equity, cash, ev.score);
+      if (amount < CONFIG.minOrder) break;
+      orders.push({ side: 'BUY', sym, eur: amount, reason: `Kaufsignal (Score ${ev.score}): ${ev.reasons.slice(0, 3).join(', ')}` });
+      cash -= amount; nPos++;
+    }
+    return orders;
+  },
+
+  suggestAmount(equity, cash, score) {
+    const conf = Math.max(0, Math.min(1, (score - CONFIG.buyThreshold) / 40));
+    let amount = equity * CONFIG.maxPosPct * (0.6 + 0.4 * conf);
+    amount = Math.min(amount, cash);
+    // Wenn nur ein kleiner Rest übrig bliebe, alles nehmen
+    if (cash - amount < CONFIG.minOrder) amount = cash;
+    return Math.floor(amount * 100) / 100;
+  },
+
+  execute(pf, order, price, now) {
+    if (order.side === 'BUY') {
+      const fee = order.eur * CONFIG.fee;
+      const qty = (order.eur - fee) / price;
+      pf.cash -= order.eur;
+      pf.positions[order.sym] = { qty, avgPrice: price, invested: order.eur, openedAt: now, peak: price };
+      const tr = { t: now, side: 'BUY', sym: order.sym, qty, price, eur: order.eur, fee, reason: order.reason };
+      pf.trades.push(tr);
+      return tr;
+    } else {
+      const pos = pf.positions[order.sym];
+      const gross = pos.qty * price;
+      const fee = gross * CONFIG.fee;
+      const net = gross - fee;
+      pf.cash += net;
+      delete pf.positions[order.sym];
+      pf.lastSell[order.sym] = now;
+      const tr = { t: now, side: 'SELL', sym: order.sym, qty: pos.qty, price, eur: net, fee, pnl: net - pos.invested, reason: order.reason };
+      pf.trades.push(tr);
+      return tr;
+    }
+  },
+
+  // Backtest auf historischen Stundenkerzen (ohne News – die gibt es rückwirkend nicht)
+  backtest(series, capital, step = 1) {
+    const syms = Object.keys(series);
+    const len = Math.min(...syms.map((s) => series[s].length));
+    const aligned = {};
+    syms.forEach((s) => (aligned[s] = series[s].slice(-len)));
+    const pf = Engine.newPortfolio(capital);
+    const curve = [];
+    const warm = 60;
+    for (let i = warm; i < len; i += step) {
+      const now = aligned[syms[0]][i].t;
+      const prices = {}, evals = {};
+      for (const s of syms) {
+        const closes = aligned[s].slice(Math.max(0, i - 200), i + 1).map((r) => r.c);
+        prices[s] = closes[closes.length - 1];
+        evals[s] = Strategy.evaluate(closes, {});
+      }
+      for (const o of Engine.decide(pf, evals, prices, now)) Engine.execute(pf, o, prices[o.sym], now);
+      curve.push({ t: now, v: Engine.equity(pf, prices) });
+    }
+    // Buy & Hold BTC (bzw. erster Coin) zum Vergleich
+    const ref = aligned[syms.includes('BTC') ? 'BTC' : syms[0]];
+    const hold = curve.map((p) => {
+      const r = ref.find((x) => x.t === p.t);
+      return { t: p.t, v: r ? (capital * r.c) / ref[warm].c : null };
+    });
+    return { pf, curve, hold };
+  },
+};
+</script>
+  <script>
+// Haupt-App: Zustand, Analysezyklus, Darstellung.
+const STORE_KEY = 'finanzbot.v1';
+const START_CAPITAL = 50;
+const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK'];
+
+const $ = (id) => document.getElementById(id);
+const eur = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v);
+const price = (v) => v == null ? '–' : new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumSignificantDigits: v < 1 ? 4 : 6, minimumFractionDigits: v >= 1 ? 2 : undefined }).format(v);
+const pct = (v, d = 1) => `${v > 0 ? '+' : ''}${v.toFixed(d).replace('.', ',')} %`;
+const time = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const cls = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+
+function freshState() {
+  return {
+    startCapital: START_CAPITAL,
+    createdAt: Date.now(),
+    pf: Engine.newPortfolio(START_CAPITAL),
+    equityHistory: [{ t: Date.now(), v: START_CAPITAL }],
+    signals: [],
+    lastAction: {},
+    settings: { autoTrade: true, coins: DEFAULT_COINS.slice(), interval: 5, notify: false, sound: false, apiKey: '' },
+  };
+}
+
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (s && s.pf) {
+      const f = freshState();
+      s.settings = Object.assign(f.settings, s.settings);
+      s.pf.lastSell = s.pf.lastSell || {};
+      return s;
+    }
+  } catch (e) { /* ignorieren */ }
+  return freshState();
+}
+
+let S = loadState();
+const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* voll/blockiert */ } };
+
+// Laufzeitdaten (nicht gespeichert)
+const R = { market: {}, news: [], newsAnalysis: null, fng: null, demo: false, lastRun: null, running: false, timer: null, selected: null, charts: {} };
+
+// ---------------------------------------------------------------- Analysezyklus
+async function cycle() {
+  if (R.running) return;
+  R.running = true;
+  $('btnRefresh').disabled = true;
+  setStatus('Analysiere Märkte …');
+  const notes = [];
+  try {
+    const syms = [...new Set([...S.settings.coins, ...Object.keys(S.pf.positions)])];
+    const key = S.settings.apiKey;
+
+    const [candleRes, newsRes, fngRes] = await Promise.all([
+      Promise.allSettled(syms.map((s) => Data.candles(s, 250, key))),
+      Data.news(key).then((v) => ({ ok: v }), (e) => ({ err: e })),
+      Data.fearGreed().then((v) => ({ ok: v }), (e) => ({ err: e })),
+    ]);
+
+    const okCount = candleRes.filter((r) => r.status === 'fulfilled').length;
+    R.demo = okCount === 0;
+    R.market = {};
+    syms.forEach((s, i) => {
+      const r = candleRes[i];
+      if (r.status === 'fulfilled') R.market[s] = r.value;
+      else if (R.demo) R.market[s] = Data.demoCandles(s, 250);
+      else notes.push(`${s}: Kurse nicht abrufbar`);
+    });
+    if (R.demo) notes.push('Kursdaten-APIs nicht erreichbar → <b>Demo-Modus</b> mit simulierten Kursen. Es werden keine Trades ausgeführt.');
+
+    R.news = newsRes.ok || [];
+    if (newsRes.err) notes.push('News-Feed nicht erreichbar – Bot entscheidet nur technisch' + (key ? '' : ' (ggf. API-Key in den Einstellungen eintragen)') + '.');
+    R.fng = fngRes.ok || null;
+
+    const now = Date.now();
+    R.newsAnalysis = Strategy.analyzeNews(R.news, Object.keys(R.market), now);
+
+    const prices = {}, evals = {};
+    for (const [sym, m] of Object.entries(R.market)) {
+      const closes = m.rows.map((r) => r.c);
+      prices[sym] = closes[closes.length - 1];
+      const ev = Strategy.evaluate(closes, {
+        news: R.newsAnalysis.perCoin[sym],
+        market: R.newsAnalysis.market,
+        fng: R.fng ? R.fng.value : null,
+      });
+      m.ev = ev;
+      m.price = prices[sym];
+      m.ch24 = closes.length > 24 ? (prices[sym] / closes[closes.length - 25] - 1) * 100 : 0;
+      if (S.settings.coins.includes(sym)) evals[sym] = ev;
+    }
+    // Gehaltene, abgewählte Coins dürfen weiterhin verkauft werden
+    for (const sym of Object.keys(S.pf.positions)) if (R.market[sym]) evals[sym] = R.market[sym].ev;
+
+    // Was würde der Bot tun? (auf einer Kopie berechnen)
+    const simPf = JSON.parse(JSON.stringify(S.pf));
+    R.plan = Engine.decide(simPf, evals, prices, now);
+
+    // Signale protokollieren (nur bei Wechsel der Empfehlung)
+    const newBuys = [];
+    for (const [sym, ev] of Object.entries(evals)) {
+      if (S.lastAction[sym] !== ev.action) {
+        S.signals.unshift({ t: now, sym, action: ev.action, score: ev.score, price: prices[sym], reasons: ev.reasons.slice(0, 4), demo: R.demo });
+        if (ev.action === 'KAUFEN') newBuys.push(sym);
+        S.lastAction[sym] = ev.action;
+      }
+    }
+    S.signals = S.signals.slice(0, 300);
+
+    // Automatisch handeln
+    if (S.settings.autoTrade && !R.demo) {
+      for (const o of Engine.decide(S.pf, evals, prices, now)) {
+        const tr = Engine.execute(S.pf, o, prices[o.sym], now);
+        toast(tr.side === 'BUY'
+          ? `🟢 Gekauft: ${o.sym} für ${eur(tr.eur)}`
+          : `🔴 Verkauft: ${o.sym} für ${eur(tr.eur)} (${tr.pnl >= 0 ? '+' : ''}${eur(tr.pnl)})`, tr.side === 'BUY' ? 'buy' : 'sell');
+      }
+    } else if (!R.demo) {
+      // Auch ohne Auto-Handel Positions-Höchststände für Trailing-Stops nachführen
+      for (const [sym, pos] of Object.entries(S.pf.positions)) if (prices[sym]) pos.peak = Math.max(pos.peak || 0, prices[sym]);
+    }
+
+    if (newBuys.length && !R.demo) alertBuys(newBuys);
+
+    if (!R.demo) {
+      const eq = Engine.equity(S.pf, prices);
+      const last = S.equityHistory[S.equityHistory.length - 1];
+      if (!last || now - last.t > 50e3) S.equityHistory.push({ t: now, v: eq });
+      if (S.equityHistory.length > 3000) S.equityHistory = S.equityHistory.filter((_, i) => i % 2 === 0 || i > 2500);
+    }
+    R.prices = prices;
+    R.lastRun = now;
+    R.source = [...new Set(Object.values(R.market).map((m) => m.source))].join(', ');
+    save();
+  } catch (e) {
+    console.error(e);
+    notes.push('Fehler bei der Analyse: ' + esc(e.message));
+  } finally {
+    R.running = false;
+    $('btnRefresh').disabled = false;
+    banner(notes);
+    render();
+    schedule();
+  }
+}
+
+function schedule() {
+  clearTimeout(R.timer);
+  R.nextRun = Date.now() + S.settings.interval * 60e3;
+  R.timer = setTimeout(cycle, S.settings.interval * 60e3);
+}
+
+// ---------------------------------------------------------------- Benachrichtigungen
+function alertBuys(syms) {
+  const lines = syms.map((s) => {
+    const plan = (R.plan || []).find((o) => o.side === 'BUY' && o.sym === s);
+    return `${s} (${COINS[s].name}) zu ${price(R.market[s].price)}${plan ? ` – ca. ${eur(plan.eur)}` : ''}`;
+  });
+  toast('🔔 Kaufsignal: ' + lines.join(' · '), 'buy', 9000);
+  if (S.settings.notify && 'Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('Trading-Bot: Kaufsignal', { body: lines.join('\n') }); } catch (e) { /* mobil ggf. nicht erlaubt */ }
+  }
+  if (S.settings.sound) beep();
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [660, 880].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.18);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.16);
+      o.start(ctx.currentTime + i * 0.18); o.stop(ctx.currentTime + i * 0.18 + 0.17);
+    });
+  } catch (e) { /* kein Audio */ }
+}
+
+function toast(msg, kind = '', ms = 6000) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+function banner(notes) {
+  const b = $('banner');
+  b.innerHTML = notes.map((n) => `<div>${n}</div>`).join('');
+  b.classList.toggle('hidden', !notes.length);
+}
+
+function setStatus(txt) { $('status').textContent = txt; }
+
+setInterval(() => {
+  if (R.running || !R.lastRun) return;
+  const left = Math.max(0, Math.round((R.nextRun - Date.now()) / 1000));
+  setStatus(`Letzte Analyse ${new Date(R.lastRun).toLocaleTimeString('de-DE')} · nächste in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · Quelle: ${R.source || '–'}${R.demo ? ' (Demo)' : ''}`);
+}, 1000);
+
+// ---------------------------------------------------------------- Darstellung
+function render() {
+  const prices = R.prices || {};
+  const eq = Engine.equity(S.pf, prices);
+  const pnl = eq - S.startCapital;
+  $('kEquity').textContent = eur(eq);
+  $('kStart').textContent = `Start: ${eur(S.startCapital)} am ${new Date(S.createdAt).toLocaleDateString('de-DE')}`;
+  $('kPnl').textContent = (pnl >= 0 ? '+' : '') + eur(pnl);
+  $('kPnl').className = cls(pnl);
+  $('kPnlPct').textContent = pct((pnl / S.startCapital) * 100, 2);
+  $('kCash').textContent = eur(S.pf.cash);
+  $('kPos').textContent = `${Object.keys(S.pf.positions).length} offene Position(en)`;
+  const closed = S.pf.trades.filter((t) => t.side === 'SELL');
+  const wins = closed.filter((t) => t.pnl > 0).length;
+  $('kTrades').textContent = closed.length;
+  $('kWin').textContent = closed.length ? `Trefferquote ${Math.round((wins / closed.length) * 100)} %` : 'noch keine';
+  if (R.fng) {
+    const de = { 'Extreme Fear': 'Extreme Angst', Fear: 'Angst', Neutral: 'Neutral', Greed: 'Gier', 'Extreme Greed': 'Extreme Gier' }[R.fng.label] || R.fng.label;
+    $('kFng').textContent = `${R.fng.value} · ${de}`;
+  } else $('kFng').textContent = '–';
+  if (R.newsAnalysis) {
+    const m = R.newsAnalysis.market;
+    $('kNews').textContent = R.newsAnalysis.count ? `News: ${m > 0.05 ? 'positiv' : m < -0.05 ? 'negativ' : 'neutral'} (${R.newsAnalysis.count} Meldungen)` : 'News: keine Daten';
+  }
+  $('autoTrade').checked = S.settings.autoTrade;
+
+  renderBuyNow();
+  renderMarket();
+  renderPositions(prices);
+  renderTrades();
+  renderSignals();
+  renderNews();
+  renderEquityChart();
+  if (R.selected) renderCoinDetail(R.selected);
+}
+
+function renderBuyNow() {
+  const el = $('buyNow');
+  const entries = Object.entries(R.market).filter(([s, m]) => m.ev && m.ev.action === 'KAUFEN' && S.settings.coins.includes(s)).sort((a, b) => b[1].ev.score - a[1].ev.score);
+  const sells = (R.plan || []).filter((o) => o.side === 'SELL');
+  if (!R.lastRun) { el.innerHTML = '<p class="muted">Analyse läuft …</p>'; return; }
+  let html = '';
+  if (!entries.length) {
+    html += '<p class="muted big">Aktuell kein Kaufsignal – der Bot wartet auf eine bessere Gelegenheit.</p>';
+  } else {
+    html += '<div class="buycards">';
+    for (const [sym, m] of entries) {
+      const plan = (R.plan || []).find((o) => o.side === 'BUY' && o.sym === sym);
+      let status;
+      if (S.pf.positions[sym]) status = '<span class="tag ok">✔ im Depot</span>';
+      else if (plan && S.settings.autoTrade && !R.demo) status = `<span class="tag ok">wird gekauft: ${eur(plan.eur)}</span>`;
+      else if (plan) status = `<span class="tag buy">Würde kaufen für ${eur(plan.eur)}</span>`;
+      else if (S.pf.lastSell[sym] && Date.now() - S.pf.lastSell[sym] < CONFIG.cooldownH * 3600e3) status = '<span class="tag">Abkühlphase nach Verkauf</span>';
+      else if (Object.keys(S.pf.positions).length >= CONFIG.maxPositions) status = '<span class="tag">Max. Positionen erreicht</span>';
+      else status = '<span class="tag">Kein freies Geld</span>';
+      html += `<div class="buycard" data-sym="${sym}">
+        <div class="bc-head"><b>${sym}</b> <span>${COINS[sym].name}</span><span class="score s-buy">${m.ev.score}</span></div>
+        <div class="bc-price">${price(m.price)} <small class="${cls(m.ch24)}">${pct(m.ch24)}</small></div>
+        ${status}
+        <ul>${m.ev.reasons.slice(0, 4).map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  if (sells.length) {
+    html += `<p><b>Verkaufen würde er:</b> ${sells.map((o) => `${o.sym} – ${esc(o.reason)}`).join('<br>')}</p>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('.buycard').forEach((c) => c.addEventListener('click', () => selectCoin(c.dataset.sym)));
+}
+
+function renderMarket() {
+  const tb = $('market').querySelector('tbody');
+  const rows = Object.entries(R.market).sort((a, b) => (b[1].ev?.score ?? -999) - (a[1].ev?.score ?? -999));
+  tb.innerHTML = rows.map(([sym, m]) => {
+    const ev = m.ev || { score: 0, action: 'HALTEN', ind: {} };
+    const n = R.newsAnalysis?.perCoin[sym];
+    const ns = n && n.count ? `<span class="${cls(n.score)}">${n.score > 0.05 ? '▲' : n.score < -0.05 ? '▼' : '●'} ${n.count}</span>` : '<span class="muted">–</span>';
+    const w = Math.min(100, Math.abs(ev.score));
+    const act = { KAUFEN: 'buy', VERKAUFEN: 'sell', HALTEN: 'hold' }[ev.action];
+    return `<tr data-sym="${sym}" class="${R.selected === sym ? 'sel' : ''}">
+      <td><b>${sym}</b> <span class="muted">${COINS[sym].name}</span>${S.pf.positions[sym] ? ' <span class="tag ok">Depot</span>' : ''}</td>
+      <td>${price(m.price)}</td>
+      <td class="${cls(m.ch24)}">${pct(m.ch24)}</td>
+      <td>${ev.ind.rsi != null ? ev.ind.rsi.toFixed(0) : '–'}</td>
+      <td>${ns}</td>
+      <td><div class="bar"><span class="${ev.score >= 0 ? 'bp' : 'bn'}" style="width:${w / 2}%;${ev.score >= 0 ? 'left:50%' : `right:50%`}"></span></div><small>${ev.score}</small></td>
+      <td><span class="act ${act}">${ev.action}</span></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted">Noch keine Daten</td></tr>';
+  tb.querySelectorAll('tr[data-sym]').forEach((tr) => tr.addEventListener('click', () => selectCoin(tr.dataset.sym)));
+}
+
+function selectCoin(sym) {
+  R.selected = R.selected === sym ? null : sym;
+  renderMarket();
+  if (R.selected) { renderCoinDetail(sym); $('coinDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  else $('coinDetail').classList.add('hidden');
+}
+
+function renderCoinDetail(sym) {
+  const m = R.market[sym];
+  if (!m) return;
+  $('coinDetail').classList.remove('hidden');
+  $('cdTitle').innerHTML = `${sym} – ${COINS[sym].name}: <span class="act ${{ KAUFEN: 'buy', VERKAUFEN: 'sell', HALTEN: 'hold' }[m.ev.action]}">${m.ev.action}</span> (Score ${m.ev.score})`;
+  $('cdReasons').innerHTML = m.ev.reasons.map((r) => `<li>${esc(r)}</li>`).join('') || '<li>Keine starken Signale</li>';
+  const n = R.newsAnalysis?.perCoin[sym];
+  $('cdNews').innerHTML = n && n.headlines.length
+    ? '<h4>News zu ' + sym + '</h4>' + n.headlines.map(newsItem).join('')
+    : '<p class="muted">Keine aktuellen News zu diesem Coin.</p>';
+
+  const rows = m.rows.slice(-168);
+  const closes = m.rows.map((r) => r.c);
+  const e20 = Ind.ema(closes, 20).slice(-168), e50 = Ind.ema(closes, 50).slice(-168);
+  const labels = rows.map((r) => time(r.t));
+  // Jeden Trade der Kerze zuordnen, in deren Stunde er stattfand
+  const tradePts = (side) => {
+    const pts = rows.map(() => null);
+    for (const tr of S.pf.trades) {
+      if (tr.sym !== sym || tr.side !== side || tr.t < rows[0].t) continue;
+      let idx = rows.length - 1;
+      while (idx > 0 && rows[idx].t > tr.t) idx--;
+      pts[idx] = tr.price;
+    }
+    return pts;
+  };
+  drawChart('coinChart', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Kurs', data: rows.map((r) => r.c), borderColor: cssVar('--accent'), borderWidth: 2, pointRadius: 0, tension: 0.1 },
+        { label: 'EMA20', data: e20, borderColor: cssVar('--c2'), borderWidth: 1, pointRadius: 0 },
+        { label: 'EMA50', data: e50, borderColor: cssVar('--c3'), borderWidth: 1, pointRadius: 0 },
+        { label: 'Kauf', data: tradePts('BUY'), showLine: false, pointRadius: 7, pointStyle: 'triangle', backgroundColor: cssVar('--pos'), borderColor: cssVar('--pos') },
+        { label: 'Verkauf', data: tradePts('SELL'), showLine: false, pointRadius: 7, pointStyle: 'triangle', rotation: 180, backgroundColor: cssVar('--neg'), borderColor: cssVar('--neg') },
+      ],
+    },
+    options: chartOpts((v) => price(v)),
+  });
+}
+
+function renderPositions(prices) {
+  const pos = Object.entries(S.pf.positions);
+  if (!pos.length) { $('positions').innerHTML = '<p class="muted">Keine offenen Positionen – alles in Bargeld.</p>'; return; }
+  $('positions').innerHTML = `<table><thead><tr><th>Coin</th><th>Einstand</th><th>Aktuell</th><th>Wert</th><th>G/V</th></tr></thead><tbody>${pos.map(([sym, p]) => {
+    const cur = prices[sym] || p.avgPrice;
+    const val = p.qty * cur, g = val - p.invested;
+    return `<tr><td><b>${sym}</b><br><small class="muted">${p.qty.toPrecision(5)} Stk. · seit ${time(p.openedAt)}</small></td>
+      <td>${price(p.avgPrice)}</td><td>${price(cur)}</td><td>${eur(val)}</td>
+      <td class="${cls(g)}">${g >= 0 ? '+' : ''}${eur(g)}<br><small>${pct((g / p.invested) * 100)}</small></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+function renderTrades() {
+  const t = S.pf.trades.slice().reverse();
+  $('trades').innerHTML = t.length ? t.map((tr) => `<div class="logrow">
+    <span class="act ${tr.side === 'BUY' ? 'buy' : 'sell'}">${tr.side === 'BUY' ? 'KAUF' : 'VERKAUF'}</span>
+    <b>${tr.sym}</b> ${eur(tr.eur)} @ ${price(tr.price)}
+    ${tr.side === 'SELL' ? `<b class="${cls(tr.pnl)}">${tr.pnl >= 0 ? '+' : ''}${eur(tr.pnl)}</b>` : ''}
+    <small class="muted">${time(tr.t)}</small>
+    <div class="muted small">${esc(tr.reason)}</div></div>`).join('') : '<p class="muted">Noch keine Trades.</p>';
+}
+
+function renderSignals() {
+  $('signals').innerHTML = S.signals.length ? S.signals.slice(0, 80).map((s) => `<div class="logrow">
+    <span class="act ${{ KAUFEN: 'buy', VERKAUFEN: 'sell', HALTEN: 'hold' }[s.action]}">${s.action}</span>
+    <b>${s.sym}</b> @ ${price(s.price)} · Score ${s.score}${s.demo ? ' <span class="tag">Demo</span>' : ''}
+    <small class="muted">${time(s.t)}</small>
+    <div class="muted small">${s.reasons.map(esc).join(' · ')}</div></div>`).join('') : '<p class="muted">Noch keine Signale.</p>';
+}
+
+function newsItem(n) {
+  const s = n.score ?? Strategy.headlineScore(n);
+  return `<a class="news ${s > 0.1 ? 'npos' : s < -0.1 ? 'nneg' : ''}" href="${esc(n.url)}" target="_blank" rel="noopener">
+    <span class="nscore">${s > 0.1 ? '▲' : s < -0.1 ? '▼' : '●'}</span>
+    <span><b>${esc(n.title)}</b><br><small class="muted">${esc(n.source)} · ${time(n.t)}</small></span></a>`;
+}
+
+function renderNews() {
+  $('news').innerHTML = R.news.length ? R.news.slice(0, 40).map(newsItem).join('') : '<p class="muted">Keine News geladen.</p>';
+}
+
+function renderEquityChart() {
+  const h = S.equityHistory;
+  drawChart('equityChart', {
+    type: 'line',
+    data: {
+      labels: h.map((p) => time(p.t)),
+      datasets: [
+        { label: 'Depotwert', data: h.map((p) => p.v), borderColor: cssVar('--accent'), backgroundColor: cssVar('--accent-soft'), fill: true, borderWidth: 2, pointRadius: 0, tension: 0.2 },
+        { label: 'Startkapital', data: h.map(() => S.startCapital), borderColor: cssVar('--muted'), borderDash: [4, 4], borderWidth: 1, pointRadius: 0 },
+      ],
+    },
+    options: chartOpts((v) => eur(v)),
+  });
+}
+
+// ---------------------------------------------------------------- Charts
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function chartOpts(fmt) {
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { labels: { color: cssVar('--muted'), boxWidth: 12 } },
+      tooltip: { callbacks: { label: (c) => c.raw == null ? null : `${c.dataset.label}: ${fmt(c.raw)}` } },
+    },
+    scales: {
+      x: { ticks: { color: cssVar('--muted'), maxTicksLimit: 6, maxRotation: 0 }, grid: { display: false } },
+      y: { ticks: { color: cssVar('--muted'), callback: fmt }, grid: { color: cssVar('--grid') } },
+    },
+  };
+}
+
+function drawChart(id, cfg) {
+  if (typeof Chart === 'undefined') return;
+  if (R.charts[id]) R.charts[id].destroy();
+  R.charts[id] = new Chart($(id), cfg);
+}
+
+// ---------------------------------------------------------------- Backtest
+async function runBacktest() {
+  const btn = $('btnBacktest');
+  btn.disabled = true; btn.textContent = 'Lade historische Daten …';
+  const syms = S.settings.coins;
+  let demo = false;
+  const series = {};
+  const res = await Promise.allSettled(syms.map((s) => Data.candles(s, 2000, S.settings.apiKey)));
+  res.forEach((r, i) => { if (r.status === 'fulfilled' && r.value.rows.length > 200) series[syms[i]] = r.value.rows; });
+  if (!Object.keys(series).length) { demo = true; syms.forEach((s) => (series[s] = Data.demoCandles(s, 2000).rows)); }
+  btn.textContent = 'Rechne …';
+  await new Promise((r) => setTimeout(r, 20));
+  const { pf, curve, hold } = Engine.backtest(series, START_CAPITAL);
+  const end = curve[curve.length - 1].v;
+  const sells = pf.trades.filter((t) => t.side === 'SELL');
+  const wins = sells.filter((t) => t.pnl > 0).length;
+  let peak = -Infinity, mdd = 0;
+  curve.forEach((p) => { peak = Math.max(peak, p.v); mdd = Math.max(mdd, (peak - p.v) / peak); });
+  const holdEnd = hold[hold.length - 1].v;
+  const days = Math.round((curve[curve.length - 1].t - curve[0].t) / 864e5);
+  $('btResult').innerHTML = `
+    ${demo ? '<p class="warn">Keine echten Kursdaten erreichbar – Backtest mit simulierten Demo-Kursen.</p>' : ''}
+    <div class="kpis small">
+      <div class="kpi"><label>Endwert nach ${days} Tagen</label><b class="${cls(end - START_CAPITAL)}">${eur(end)}</b><small>${pct((end / START_CAPITAL - 1) * 100)}</small></div>
+      <div class="kpi"><label>Vergleich: nur BTC halten</label><b>${eur(holdEnd)}</b><small>${pct((holdEnd / START_CAPITAL - 1) * 100)}</small></div>
+      <div class="kpi"><label>Trades</label><b>${sells.length}</b><small>Trefferquote ${sells.length ? Math.round((wins / sells.length) * 100) : 0} %</small></div>
+      <div class="kpi"><label>Max. Rückgang</label><b class="neg">${pct(-mdd * 100)}</b><small>Gebühren: ${eur(pf.trades.reduce((a, t) => a + t.fee, 0))}</small></div>
+    </div>`;
+  const step = Math.max(1, Math.floor(curve.length / 400));
+  const c = curve.filter((_, i) => i % step === 0), hh = hold.filter((_, i) => i % step === 0);
+  drawChart('btChart', {
+    type: 'line',
+    data: {
+      labels: c.map((p) => time(p.t)),
+      datasets: [
+        { label: 'Bot-Strategie', data: c.map((p) => p.v), borderColor: cssVar('--accent'), borderWidth: 2, pointRadius: 0 },
+        { label: 'BTC halten', data: hh.map((p) => p.v), borderColor: cssVar('--c3'), borderWidth: 1, pointRadius: 0 },
+      ],
+    },
+    options: chartOpts((v) => eur(v)),
+  });
+  btn.disabled = false; btn.textContent = 'Backtest erneut starten';
+}
+
+// ---------------------------------------------------------------- Einstellungen
+function openSettings() {
+  $('coinPicker').innerHTML = Object.entries(COINS).map(([s, c]) =>
+    `<label class="chip"><input type="checkbox" value="${s}" ${S.settings.coins.includes(s) ? 'checked' : ''}> ${s} <small>${c.name}</small></label>`).join('');
+  $('interval').value = String(S.settings.interval);
+  $('notify').checked = S.settings.notify;
+  $('sound').checked = S.settings.sound;
+  $('apiKey').value = S.settings.apiKey;
+  $('settings').showModal();
+}
+
+function wire() {
+  $('btnRefresh').addEventListener('click', cycle);
+  $('btnSettings').addEventListener('click', openSettings);
+  $('btnBacktest').addEventListener('click', () => runBacktest().catch((e) => { $('btResult').innerHTML = `<p class="warn">Backtest fehlgeschlagen: ${esc(e.message)}</p>`; $('btnBacktest').disabled = false; }));
+  $('autoTrade').addEventListener('change', (e) => { S.settings.autoTrade = e.target.checked; save(); if (e.target.checked) cycle(); });
+  $('notify').addEventListener('change', async (e) => {
+    if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') {
+      const p = await Notification.requestPermission();
+      if (p !== 'granted') { e.target.checked = false; toast('Benachrichtigungen wurden vom Browser blockiert.'); }
+    }
+  });
+  $('settings').addEventListener('close', () => {
+    const coins = [...$('coinPicker').querySelectorAll('input:checked')].map((i) => i.value);
+    S.settings.coins = coins.length ? coins : DEFAULT_COINS.slice();
+    S.settings.interval = Number($('interval').value);
+    S.settings.notify = $('notify').checked;
+    S.settings.sound = $('sound').checked;
+    S.settings.apiKey = $('apiKey').value.trim();
+    save();
+    cycle();
+  });
+  $('btnReset').addEventListener('click', () => {
+    if (!confirm('Depot, Trades und Signale löschen und mit 50 € neu starten?')) return;
+    const settings = S.settings;
+    S = freshState(); S.settings = settings; save();
+    $('settings').close();
+  });
+  $('btnExport').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }));
+    a.download = `tradingbot-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+  });
+  document.addEventListener('visibilitychange', () => {
+    // Nach Rückkehr in den Tab sofort aktualisieren, falls überfällig
+    if (!document.hidden && R.nextRun && Date.now() > R.nextRun) cycle();
+  });
+}
+
+wire();
+render();
+cycle();
+</script>
+</body>
+</html>
