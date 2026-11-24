@@ -6,23 +6,13 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Quellen prüfen
+      - name: TradingView prüfen
         run: |
-          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
-          t() { echo "=== $1"; curl -s -m 20 -A "$UA" -o /tmp/o -w "HTTP %{http_code} %{size_download}B\n" "$2"; head -c 300 /tmp/o | tr '\n' ' '; echo; }
-          t stooq-daily "https://stooq.com/q/d/l/?s=aapl.us&i=d"
-          t stooq-hourly "https://stooq.com/q/d/l/?s=aapl.us&i=60"
-          t stooq-de "https://stooq.com/q/d/l/?s=sap.de&i=d"
-          t stooq-quote "https://stooq.com/q/l/?s=aapl.us+sap.de&f=sd2t2ohlcv&h&e=csv"
-          t cboe-vix "https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json"
-          t cboe-aapl-quote "https://cdn.cboe.com/api/global/delayed_quotes/quotes/AAPL.json"
-          t cboe-aapl-hist "https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/AAPL.json"
-          t cboe-aapl-intraday "https://cdn.cboe.com/api/global/delayed_quotes/charts/intraday/AAPL.json"
-          t nasdaq-chart "https://api.nasdaq.com/api/quote/AAPL/chart?assetclass=stocks"
-          t yahoo-spark "https://query1.finance.yahoo.com/v7/finance/spark?symbols=AAPL&range=1mo&interval=60m"
-          t yahoo-chart "https://query2.finance.yahoo.com/v8/finance/chart/AAPL?range=1mo&interval=60m"
-          t onvista "https://api.onvista.de/api/v1/instruments/STOCK/86627/chart_history?chartType=PRICE&duration=P1M&resolution=PT1H"
-          t ariva "https://www.boerse-frankfurt.de/"
-          t tradingview "https://scanner.tradingview.com/america/scan"
-          t marketwatch "https://www.marketwatch.com/investing/stock/aapl/downloaddatapartial?startdate=11/01/2026&enddate=11/24/2026&frequency=p1d&csvdownload=true"
-          t investing-ecb "https://api.frankfurter.app/latest?from=EUR&to=USD"
+          COLS='["name","close","currency","change","Perf.W","high","low","RSI|60","MACD.macd|60","MACD.signal|60","EMA20|60","EMA50|60","BB.lower|60","BB.upper|60","Volatility.D","current_session","update_mode","market_cap_basic","change|60"]'
+          p() { echo "=== $1"; curl -s -m 20 -X POST -H 'Content-Type: application/json' -A "Mozilla/5.0" -d "$3" "https://scanner.tradingview.com/$2/scan" | head -c 2500; echo; }
+          p america america "{\"symbols\":{\"tickers\":[\"NASDAQ:AAPL\",\"NASDAQ:NVDA\"]},\"columns\":$COLS}"
+          p germany germany "{\"symbols\":{\"tickers\":[\"XETR:SAP\",\"XETR:RHM\"]},\"columns\":$COLS}"
+          p vix cfd '{"symbols":{"tickers":["TVC:VIX","FX_IDC:EURUSD"]},"columns":["close","change"]}'
+          p global global "{\"symbols\":{\"tickers\":[\"XETR:SAP\",\"NASDAQ:AAPL\"]},\"columns\":[\"close\",\"currency\",\"current_session\"]}"
+          echo "=== cboe -L"; curl -sL -m 20 -A "Mozilla/5.0" "https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json" | head -c 300; echo
+          echo "=== nasdaq hist"; curl -s -m 20 -A "Mozilla/5.0" "https://api.nasdaq.com/api/quote/AAPL/historical?assetclass=stocks&fromdate=2026-10-01&limit=5" | head -c 400; echo
