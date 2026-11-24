@@ -1,53 +1,64 @@
 # 📊 Trading-Bot – Status
 
-**Stand:** 24.11., 10:24 Uhr · aktualisiert sich stündlich · Lauf Nr. 2
+### 🌐 [Zur Webseite mit Heatmap & Charts](https://raw.githack.com/lmsantana614-stack/Finanz/main/index.html)
 
-| Depotwert | Gewinn / Verlust | Bargeld | Abgeschl. Trades | Marktstimmung |
-|---|---|---|---|---|
-| **50,00 €** | **+0,00 €** (0,0 %) | 50,00 € | 0 | 11 – Extreme Angst |
+**Stand:** 24.11., 10:56 Uhr · Lauf Nr. 1 · Krypto + Aktien · Long/Short bis 5x Hebel
 
-Gestartet mit 50,00 € am 24.11.2026.
+| Depotwert | Gewinn / Verlust | Frei | Abgeschl. Trades | Krypto-Stimmung | Aktien-Stimmung (VIX) |
+|---|---|---|---|---|---|
+| **50,00 €** | **+0,00 €** (0,0 %) | 50,00 € | 0 | 11/100 | – |
 
-## 🔔 Was der Bot jetzt kaufen würde
+## 🔔 Was der Bot jetzt tun würde
 
-Aktuell kein Kaufsignal – der Bot wartet auf eine bessere Gelegenheit.
+Kein Signal – der Bot wartet auf eine bessere Gelegenheit.
 
 
 ## 💼 Offene Positionen
 
-Keine – alles in Bargeld.
+Keine – alles frei.
+
+## 🗺️ Heatmap (1 Tag)
+
+**Krypto:** 🔴 BTC -2,1 % · 🔴 ETH -2,0 % · ⚪ XRP -0,1 % · 🔴 SOL -2,0 % · 🟢 DOGE +1,0 % · ⚪ ADA +0,2 % · 🟢 LINK +1,4 % · 🟢 AVAX +0,9 %
+
+**Aktien:** 
 
 ## 🧭 Marktübersicht
 
-| Coin | Kurs | 24h | RSI | News | Score | Empfehlung |
-|---|---|---|---|---|---|---|
-| **LINK** | 8,26458 € | +1,9 % | 51 | – | 17 | ⚪ HALTEN |
-| **DOGE** | 0,05104 € | +1,0 % | 44 | – | 3 | ⚪ HALTEN |
-| **AVAX** | 6,151 € | +1,2 % | 45 | – | 3 | ⚪ HALTEN |
-| **XRP** | 0,8543 € | +0,0 % | 43 | – | 1 | ⚪ HALTEN |
-| **SOL** | 64,83 € | -1,8 % | 40 | ● 1 | -3 | ⚪ HALTEN |
-| **ADA** | 0,1344 € | +0,6 % | 46 | ● 1 | -6 | ⚪ HALTEN |
-| **ETH** | 1.540,62 € | -1,8 % | 37 | ▲ 4 | -19 | ⚪ HALTEN |
-| **BTC** | 54.837,2 € | -2,0 % | 36 | ● 27 | -23 | 🔴 VERKAUFEN |
+| Anlage | Kurs | 1 Tag | 7 Tage | RSI | Score | Signal | Hebel |
+|---|---|---|---|---|---|---|---|
+| **LINK**  | 8,22619 € | +1,4 % | -1,1 % | 48 | 15 | ⚪ HALTEN | 1x |
+| **DOGE**  | 0,05102 € | +1,0 % | -4,4 % | 44 | 2 | ⚪ HALTEN | 1x |
+| **AVAX**  | 6,136 € | +0,9 % | -6,0 % | 44 | 2 | ⚪ HALTEN | 1x |
+| **ADA**  | 0,1339 € | +0,2 % | -3,9 % | 44 | 1 | ⚪ HALTEN | 1x |
+| **XRP**  | 0,8535 € | -0,1 % | -2,1 % | 42 | 0 | ⚪ HALTEN | 1x |
+| **SOL**  | 64,65 € | -2,0 % | -2,2 % | 39 | -4 | ⚪ HALTEN | 1x |
+| **ETH**  | 1.537,65 € | -2,0 % | -6,6 % | 36 | -20 | ⚪ HALTEN | 1x |
+| **BTC**  | 54.760 € | -2,1 % | -6,3 % | 35 | -28 | 🔴 VERKAUFEN | 1x |
 
-Score ab +35 → Kaufen, ab −20 → Verkaufen. Er setzt sich zusammen aus Trend, MACD, RSI, Bollinger-Bändern, 24h-Bewegung, News-Stimmung und Fear & Greed.
+🌙 = Börse gerade geschlossen. Score ≥ +35 → Long, ≤ −40 → Short. Hebel 1–5x je nach Signalstärke und Schwankung.
 
 ## 🧾 Letzte Trades
 
 Noch keine Trades.
 
-## 📰 Aktuelle News (RSS)
+## 🧪 Backtest (letzte 30 Tage)
 
-- ● [Bitcoin ETFs keep bleeding as BlackRock’s IBIT shares gain nearly 5%](https://cointelegraph.com/markets/bitcoin-etfs-bleed-ibit-shares-gain?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 08:41_
-- ● [Here’s what happened in crypto today](https://cointelegraph.com/news/what-happened-in-crypto-today?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 07:00_
-- ▼ [Why 42 Macro says it’s waiting to buy the Bitcoin dip](https://cointelegraph.com/markets/why-42-macro-says-its-waiting-to-buy-the-bitcoin-dip?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 06:07_
-- ● [Google wants to make you the star of your own AI slop movies](https://cointelegraph.com/news/google-wants-make-you-star-your-own-ai-slop-movies?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 04:13_
-- ▲ [Ethereum Foundation doubles protocol security team ahead of overhaul](https://cointelegraph.com/news/ethereum-foundation-doubles-protocol-security-team-amid-ai-quantum-overhaul?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 01:36_
-- ● [U.S. CFTC sets policies on event contract data, using crypto to check financial boxes](https://www.coindesk.com/policy/2026/11/23/u-s-cftc-sets-policies-on-event-contract-data-using-crypto-to-check-financial-boxes) – _CoinDesk, 24.11., 01:25_
-- ● [CFTC staff say exchanges can count Bitcoin toward operating reserves](https://cointelegraph.com/news/cftc-staff-say-exchanges-can-count-bitcoin-toward-operating-reserves?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 00:43_
-- ● [China's Z.ai Says Its New AI Model Can Think Like One Four Times Its Size](https://decrypt.co/383851/chinas-zai-new-ai-model-glm-think-like-four-times-size) – _Decrypt, 24.11., 00:06_
-- ● [OpenAI Will Pay You Up to $8K to Preach the AI Gospel to Small Businesses](https://decrypt.co/383848/openai-will-pay-8k-preach-ai-gospel-small-businesses) – _Decrypt, 23.11., 22:46_
-- ▼ [Why One Math Proof Has AI Experts Warning Humans Might Soon Lose Control](https://decrypt.co/383846/why-one-math-proof-ai-experts-warning-humans-lose-control) – _Decrypt, 23.11., 22:16_
+Aus 50 € wären **47,80 €** geworden (-4,4 %), 34 Trades, 38 % Gewinner, max. Rückgang -10,7 %. Zum Vergleich BTC halten: 37,73 €.
+
+<details><summary>Technische Hinweise</summary>
+
+- EUR/USD-Kurs nicht abrufbar – US-Aktien ausgelassen.
+- SAP: keine Kurse (HTTP 429)
+- SIE: keine Kurse (HTTP 429)
+- DTE: keine Kurse (HTTP 429)
+- ALV: keine Kurse (HTTP 429)
+- RHM: keine Kurse (HTTP 429)
+- MBG: keine Kurse (HTTP 429)
+- VIX nicht abrufbar.
+- Keine Aktien-News abrufbar.
+
+</details>
 
 ---
-_Papier-Trading mit virtuellem Geld. Automatisch berechnete Signale, keine Anlageberatung. Kryptowährungen sind hochriskant._
+_Papier-Trading mit virtuellem Geld. Hebel vervielfacht Gewinne und Verluste. Keine Anlageberatung._
