@@ -35,6 +35,9 @@ function loadState() {
   return { startCapital: START_CAPITAL, createdAt: Date.now(), pf: Engine.newPortfolio(START_CAPITAL), equityHistory: [], lastAction: {}, issue: null, runs: 0 };
 }
 
+const decode = (s) => s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+  .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+
 // ---- News: CryptoCompare, sonst RSS-Feeds (auf dem Server gibt es keine CORS-Probleme)
 async function loadNews() {
   try {
@@ -55,7 +58,7 @@ async function loadNews() {
       for (const m of xml.matchAll(/<item[\s>][\s\S]*?<\/item>/g)) {
         const get = (tag) => {
           const x = m[0].match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
-          return x ? x[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '').trim() : '';
+          return x ? decode(x[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '')).trim() : '';
         };
         const t = Date.parse(get('pubDate')) || Date.now();
         items.push({ t, title: get('title'), body: get('description').slice(0, 400), url: get('link'), source: name, tags: '' });
@@ -145,6 +148,7 @@ async function notify(S, text) {
 
   // Benachrichtigung
   const lines = [];
+  if (!S.issue) lines.push('👋 **Dein Trading-Bot ist gestartet!** Ab jetzt prüft er jede Stunde Kurse, News und Marktstimmung und meldet sich hier, sobald er etwas kauft, verkauft oder kaufen würde.');
   for (const tr of executed) {
     if (tr.side === 'BUY') lines.push(`🟢 **Gekauft: ${tr.sym}** für ${eur(tr.eur)} zu ${price(tr.price)}\n> ${md(tr.reason)}`);
     else lines.push(`🔴 **Verkauft: ${tr.sym}** für ${eur(tr.eur)} zu ${price(tr.price)} → ${tr.pnl >= 0 ? 'Gewinn' : 'Verlust'} **${tr.pnl >= 0 ? '+' : ''}${eur(tr.pnl)}**\n> ${md(tr.reason)}`);
