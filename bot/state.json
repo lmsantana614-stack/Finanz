@@ -1,0 +1,29 @@
+{
+ "startCapital": 50,
+ "createdAt": 1795512258506,
+ "pf": {
+  "cash": 50,
+  "positions": {},
+  "trades": [],
+  "lastSell": {}
+ },
+ "equityHistory": [
+  {
+   "t": 1795512258506,
+   "v": 50
+  }
+ ],
+ "lastAction": {
+  "BTC": "VERKAUFEN",
+  "ETH": "HALTEN",
+  "SOL": "HALTEN",
+  "XRP": "HALTEN",
+  "ADA": "HALTEN",
+  "DOGE": "HALTEN",
+  "AVAX": "HALTEN",
+  "LINK": "HALTEN"
+ },
+ "issue": null,
+ "runs": 1,
+ "lastRun": 1795512258506
+}
