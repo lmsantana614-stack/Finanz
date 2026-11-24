@@ -11,6 +11,10 @@
   {
    "t": 1795512258506,
    "v": 50
+  },
+  {
+   "t": 1795512299677,
+   "v": 50
   }
  ],
  "lastAction": {
@@ -23,7 +27,7 @@
   "AVAX": "HALTEN",
   "LINK": "HALTEN"
  },
- "issue": null,
- "runs": 1,
- "lastRun": 1795512258506
+ "issue": 1,
+ "runs": 2,
+ "lastRun": 1795512299677
 }

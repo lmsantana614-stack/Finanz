@@ -1,6 +1,6 @@
 # 📊 Trading-Bot – Status
 
-**Stand:** 24.11., 10:24 Uhr · aktualisiert sich stündlich · Lauf Nr. 1
+**Stand:** 24.11., 10:24 Uhr · aktualisiert sich stündlich · Lauf Nr. 2
 
 | Depotwert | Gewinn / Verlust | Bargeld | Abgeschl. Trades | Marktstimmung |
 |---|---|---|---|---|
@@ -25,10 +25,10 @@ Keine – alles in Bargeld.
 | **DOGE** | 0,05104 € | +1,0 % | 44 | – | 3 | ⚪ HALTEN |
 | **AVAX** | 6,151 € | +1,2 % | 45 | – | 3 | ⚪ HALTEN |
 | **XRP** | 0,8543 € | +0,0 % | 43 | – | 1 | ⚪ HALTEN |
-| **SOL** | 64,76 € | -1,9 % | 39 | ● 1 | -3 | ⚪ HALTEN |
+| **SOL** | 64,83 € | -1,8 % | 40 | ● 1 | -3 | ⚪ HALTEN |
 | **ADA** | 0,1344 € | +0,6 % | 46 | ● 1 | -6 | ⚪ HALTEN |
-| **ETH** | 1.540,09 € | -1,8 % | 37 | ▲ 4 | -19 | ⚪ HALTEN |
-| **BTC** | 54.810,8 € | -2,0 % | 36 | ● 27 | -23 | 🔴 VERKAUFEN |
+| **ETH** | 1.540,62 € | -1,8 % | 37 | ▲ 4 | -19 | ⚪ HALTEN |
+| **BTC** | 54.837,2 € | -2,0 % | 36 | ● 27 | -23 | 🔴 VERKAUFEN |
 
 Score ab +35 → Kaufen, ab −20 → Verkaufen. Er setzt sich zusammen aus Trend, MACD, RSI, Bollinger-Bändern, 24h-Bewegung, News-Stimmung und Fear & Greed.
 
@@ -45,7 +45,7 @@ Noch keine Trades.
 - ▲ [Ethereum Foundation doubles protocol security team ahead of overhaul](https://cointelegraph.com/news/ethereum-foundation-doubles-protocol-security-team-amid-ai-quantum-overhaul?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 01:36_
 - ● [U.S. CFTC sets policies on event contract data, using crypto to check financial boxes](https://www.coindesk.com/policy/2026/11/23/u-s-cftc-sets-policies-on-event-contract-data-using-crypto-to-check-financial-boxes) – _CoinDesk, 24.11., 01:25_
 - ● [CFTC staff say exchanges can count Bitcoin toward operating reserves](https://cointelegraph.com/news/cftc-staff-say-exchanges-can-count-bitcoin-toward-operating-reserves?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound) – _Cointelegraph, 24.11., 00:43_
-- ● [China&#39;s Z.ai Says Its New AI Model Can Think Like One Four Times Its Size](https://decrypt.co/383851/chinas-zai-new-ai-model-glm-think-like-four-times-size) – _Decrypt, 24.11., 00:06_
+- ● [China's Z.ai Says Its New AI Model Can Think Like One Four Times Its Size](https://decrypt.co/383851/chinas-zai-new-ai-model-glm-think-like-four-times-size) – _Decrypt, 24.11., 00:06_
 - ● [OpenAI Will Pay You Up to $8K to Preach the AI Gospel to Small Businesses](https://decrypt.co/383848/openai-will-pay-8k-preach-ai-gospel-small-businesses) – _Decrypt, 23.11., 22:46_
 - ▼ [Why One Math Proof Has AI Experts Warning Humans Might Soon Lose Control](https://decrypt.co/383846/why-one-math-proof-ai-experts-warning-humans-lose-control) – _Decrypt, 23.11., 22:16_
 
