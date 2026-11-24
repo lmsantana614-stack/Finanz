@@ -41,20 +41,54 @@ async function getJSON(url) {
 }
 
 // ---- Yahoo Finance (nur serverseitig, im Browser blockiert)
+// Wie yfinance: erst ein Sitzungs-Cookie + "Crumb" holen, dann langsam nacheinander abfragen.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let YS = null;
+async function yahooSession() {
+  if (YS) return YS;
+  YS = { cookie: '', crumb: '' };
+  try {
+    const r = await fetch('https://fc.yahoo.com', { headers: UA, redirect: 'manual' });
+    const set = r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie') || ''];
+    YS.cookie = set.map((c) => c.split(';')[0]).filter(Boolean).join('; ');
+    const c = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', { headers: { ...UA, Cookie: YS.cookie } });
+    if (c.ok) YS.crumb = (await c.text()).trim();
+  } catch (e) { /* ohne Sitzung weiter */ }
+  return YS;
+}
 async function yahoo(sym, range = '3mo', interval = '60m') {
+  const ses = await yahooSession();
   let lastErr;
-  for (const host of ['query1', 'query2']) {
+  for (const [i, host] of ['query1', 'query2', 'query1', 'query2'].entries()) {
     try {
-      const j = await getJSON(`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false`);
+      if (i) await sleep(1500 * i);
+      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false${ses.crumb ? `&crumb=${encodeURIComponent(ses.crumb)}` : ''}`;
+      const r = await fetch(url, { headers: { ...UA, Accept: 'application/json', ...(ses.cookie ? { Cookie: ses.cookie } : {}) } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
       const res = j.chart && j.chart.result && j.chart.result[0];
       if (!res || !res.timestamp) throw new Error((j.chart && j.chart.error && j.chart.error.description) || 'keine Daten');
       const q = res.indicators.quote[0];
-      const rows = res.timestamp.map((t, i) => ({ t: t * 1000, c: q.close[i], h: q.high[i], l: q.low[i], v: q.volume ? q.volume[i] : 0 }))
-        .filter((r) => r.c != null && r.h != null && r.l != null);
+      const rows = res.timestamp.map((t, k) => ({ t: t * 1000, c: q.close[k], h: q.high[k], l: q.low[k], v: q.volume ? q.volume[k] : 0 }))
+        .filter((x) => x.c != null && x.h != null && x.l != null);
+      await sleep(400);
       return { rows, meta: res.meta };
     } catch (e) { lastErr = e; }
   }
   throw lastErr;
+}
+
+// Ersatzquellen
+async function eurUsdFallback() {
+  const j = await getJSON('https://api.frankfurter.app/latest?from=EUR&to=USD'); // EZB-Referenzkurs
+  if (!j.rates || !j.rates.USD) throw new Error('kein Kurs');
+  return j.rates.USD;
+}
+async function vixFallback() {
+  const j = await getJSON('https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json');
+  const v = j.data && (j.data.current_price || j.data.close);
+  if (!v) throw new Error('kein VIX');
+  return v;
 }
 
 async function rss(url, kind, tag, source) {
@@ -79,7 +113,16 @@ async function loadNews(problems) {
   }
   const stock = [];
   for (const s of STOCKS) {
-    try { stock.push(...(await rss(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(s)}&region=US&lang=en-US`, 'stock', s.toUpperCase(), 'Yahoo Finance'))); } catch (e) { /* weiter */ }
+    let items = [];
+    try { items = await rss(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(s)}&region=US&lang=en-US`, 'stock', s.toUpperCase(), 'Yahoo Finance'); } catch (e) { /* Ersatz */ }
+    if (!items.length) {
+      try {
+        const q = encodeURIComponent(`"${ASSETS[s].name}" stock`);
+        items = (await rss(`https://news.google.com/rss/search?q=${q}+when:2d&hl=en-US&gl=US&ceid=US:en`, 'stock', s.toUpperCase(), 'Google News')).slice(0, 8)
+          .map((n) => { const m = n.title.match(/^(.*) - ([^-]+)$/); return m ? { ...n, title: m[1], source: m[2].trim() } : n; });
+      } catch (e) { /* weiter */ }
+    }
+    stock.push(...items);
   }
   if (!crypto.length) problems.push('Keine Krypto-News abrufbar.');
   if (!stock.length) problems.push('Keine Aktien-News abrufbar.');
@@ -144,7 +187,7 @@ function changeDays(rows, days, off) {
   }
   let eurusd = null;
   try { const fx = await yahoo('EURUSD=X', '5d', '60m'); eurusd = fx.meta.regularMarketPrice || fx.rows[fx.rows.length - 1].c; }
-  catch (e) { problems.push('EUR/USD-Kurs nicht abrufbar – US-Aktien ausgelassen.'); }
+  catch (e) { try { eurusd = await eurUsdFallback(); } catch (e2) { problems.push('EUR/USD-Kurs nicht abrufbar – US-Aktien ausgelassen.'); } }
   for (const s of STOCKS) {
     const us = ASSETS[s].market === 'US';
     if (us && !eurusd) continue;
@@ -163,7 +206,8 @@ function changeDays(rows, days, off) {
   // ---- Stimmung
   let fng = null, vix = null;
   try { fng = await Data.fearGreed(); } catch (e) { problems.push('Krypto Fear & Greed nicht abrufbar.'); }
-  try { const v = await yahoo('^VIX', '5d', '1d'); vix = v.meta.regularMarketPrice || v.rows[v.rows.length - 1].c; } catch (e) { problems.push('VIX nicht abrufbar.'); }
+  try { const v = await yahoo('^VIX', '5d', '1d'); vix = v.meta.regularMarketPrice || v.rows[v.rows.length - 1].c; }
+  catch (e) { try { vix = await vixFallback(); } catch (e2) { problems.push('VIX nicht abrufbar.'); } }
   const stockFng = vix != null ? Math.round(Math.max(0, Math.min(100, 100 - (vix - 10) * 4))) : null;
   const news = await loadNews(problems);
   const analysis = Strategy.analyzeNews(news, Object.keys(market), now);
