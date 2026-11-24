@@ -76,9 +76,18 @@ async function rss(url, kind, tag, source) {
 async function loadNewsCached(problems, now) {
   const c = loadJSON(F.news, null);
   if (c && now - c.at < 15 * 60e3 && c.items && c.items.length) return c.items;
-  const items = await loadNews(problems);
+  let items = await loadNews(problems);
+  // Fehlt eine Art (z. B. Aktien-News gedrosselt), die letzten bekannten Meldungen dieser Art weiterverwenden
+  const old = (c && c.items) || [];
+  for (const kind of ['crypto', 'stock']) {
+    if (!items.some((n) => n.kind === kind)) {
+      const keep = old.filter((n) => n.kind === kind && now - n.t < 48 * 3600e3);
+      if (keep.length) { items = items.concat(keep); const i = problems.findIndex((p) => p.includes(kind === 'stock' ? 'Aktien-News' : 'Krypto-News')); if (i >= 0) problems[i] += ' Letzte bekannte Meldungen werden verwendet.'; }
+    }
+  }
+  items.sort((a, b) => b.t - a.t);
   if (items.length) fs.writeFileSync(F.news, JSON.stringify({ at: now, items: items.slice(0, 300) }));
-  return items.length ? items : (c && c.items) || [];
+  return items;
 }
 
 async function loadNews(problems) {
