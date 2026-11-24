@@ -80,24 +80,30 @@ const Strategy = {
   evaluate(closes, ctx = {}) {
     const i = closes.length - 1;
     const bpd = ctx.barsPerDay || 24;
-    const reasons = [];
-    let score = 0;
-    if (closes.length < 60) return { score: 0, action: 'HALTEN', reasons: ['Zu wenige Kursdaten'], ind: {} };
-
+    if (closes.length < 60) return { score: 0, action: 'HALTEN', reasons: ['Zu wenige Kursdaten'], lev: 1, ind: {} };
     const price = closes[i];
-    const ema20 = Ind.ema(closes, 20)[i];
-    const ema50 = Ind.ema(closes, 50)[i];
-    const rsi = Ind.rsi(closes, 14)[i];
     const m = Ind.macd(closes);
-    const hist = m.hist[i], histPrev = m.hist[i - 1];
     const bb = Ind.bollinger(closes, 20, 2);
-    const mom = closes.length > bpd ? (price / closes[i - bpd] - 1) * 100 : 0;
     // Tagesvolatilität aus Stundenrenditen der letzten ~2 Tage
     const rets = [];
     for (let k = Math.max(1, i - 2 * bpd); k <= i; k++) rets.push(Math.log(closes[k] / closes[k - 1]));
     const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
-    const vol = Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length) * Math.sqrt(bpd) * 100;
+    return Strategy.score({
+      price, ema20: Ind.ema(closes, 20)[i], ema50: Ind.ema(closes, 50)[i], rsi: Ind.rsi(closes, 14)[i],
+      hist: m.hist[i], histPrev: m.hist[i - 1], bbLower: bb.lower[i], bbUpper: bb.upper[i],
+      mom: closes.length > bpd ? (price / closes[i - bpd] - 1) * 100 : 0,
+      vol: Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length) * Math.sqrt(bpd) * 100,
+    }, ctx);
+  },
 
+  // Gemeinsame Bewertung – aus selbst berechneten oder gelieferten Indikatoren (z. B. TradingView bei Aktien)
+  // ind = { price, ema20, ema50, rsi, hist, histPrev (optional), bbLower, bbUpper, mom (% 1 Tag), vol (% Tagesschwankung) }
+  score(ind, ctx = {}) {
+    const { price, ema20, ema50, rsi, hist, histPrev, bbLower, bbUpper, mom, vol } = ind;
+    const reasons = [];
+    let score = 0;
+
+    if (ema50 == null) return { score: 0, action: 'HALTEN', reasons: ['Zu wenige Kursdaten'], lev: 1, ind };
     if (price > ema50 && ema20 > ema50) { score += 20; reasons.push('Aufwärtstrend (Kurs > EMA50)'); }
     else if (price < ema50 && ema20 < ema50) { score -= 20; reasons.push('Abwärtstrend (Kurs < EMA50)'); }
 
@@ -106,18 +112,22 @@ const Strategy = {
       else if (hist < 0 && hist < histPrev) { score -= 15; reasons.push('MACD fällt'); }
       else if (histPrev < 0 && hist > 0) { score += 10; reasons.push('MACD-Kreuzung nach oben'); }
       else if (histPrev > 0 && hist < 0) { score -= 10; reasons.push('MACD-Kreuzung nach unten'); }
+    } else if (hist != null) {
+      if (hist > 0) { score += 10; reasons.push('MACD positiv'); }
+      else if (hist < 0) { score -= 10; reasons.push('MACD negativ'); }
     }
 
-    if (rsi < 30) { score += 25; reasons.push(`RSI ${rsi.toFixed(0)} – überverkauft`); }
+    if (rsi == null) { /* kein RSI */ }
+    else if (rsi < 30) { score += 25; reasons.push(`RSI ${rsi.toFixed(0)} – überverkauft`); }
     else if (rsi < 45) { score += 8; reasons.push(`RSI ${rsi.toFixed(0)} – günstig`); }
     else if (rsi > 75) { score -= 25; reasons.push(`RSI ${rsi.toFixed(0)} – stark überkauft`); }
     else if (rsi > 65) { score -= 10; reasons.push(`RSI ${rsi.toFixed(0)} – überkauft`); }
 
-    if (bb.lower[i] != null && price < bb.lower[i]) { score += 10; reasons.push('Unter unterem Bollinger-Band'); }
-    else if (bb.upper[i] != null && price > bb.upper[i]) { score -= 10; reasons.push('Über oberem Bollinger-Band'); }
+    if (bbLower != null && price < bbLower) { score += 10; reasons.push('Unter unterem Bollinger-Band'); }
+    else if (bbUpper != null && price > bbUpper) { score -= 10; reasons.push('Über oberem Bollinger-Band'); }
 
-    score += Math.max(-15, Math.min(15, mom * 2));
-    if (Math.abs(mom) >= 2) reasons.push(`1 Tag: ${mom > 0 ? '+' : ''}${mom.toFixed(1).replace('.', ',')} %`);
+    score += Math.max(-15, Math.min(15, (mom || 0) * 2));
+    if (Math.abs(mom || 0) >= 2) reasons.push(`1 Tag: ${mom > 0 ? '+' : ''}${mom.toFixed(1).replace('.', ',')} %`);
 
     if (ctx.news && ctx.news.count) {
       const pts = ctx.news.score * 30;
@@ -146,7 +156,7 @@ const Strategy = {
       reasons.unshift(`⚠ Warn-Meldung: „${ctx.news.redFlag}“`);
     }
     score = Math.round(score);
-    const lev = Strategy.leverage(score, vol);
+    const lev = Strategy.leverage(score, vol || 0);
     return { score, action, reasons, lev, ind: { price, ema20, ema50, rsi, mom, vol } };
   },
 

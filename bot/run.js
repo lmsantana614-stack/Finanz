@@ -6,7 +6,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
-const F = { state: path.join(__dirname, 'state.json'), market: path.join(__dirname, 'market.json'), bt: path.join(__dirname, 'backtest.json'), status: path.join(ROOT, 'STATUS.md') };
+const F = { state: path.join(__dirname, 'state.json'), market: path.join(__dirname, 'market.json'), bt: path.join(__dirname, 'backtest.json'), hist: path.join(__dirname, 'history.json'), status: path.join(ROOT, 'STATUS.md') };
 const START_CAPITAL = 50;
 const DRY = process.argv.includes('--dry');
 const REPO = process.env.GITHUB_REPOSITORY || 'OWNER/REPO';
@@ -40,55 +40,24 @@ async function getJSON(url) {
   return r.json();
 }
 
-// ---- Yahoo Finance (nur serverseitig, im Browser blockiert)
-// Wie yfinance: erst ein Sitzungs-Cookie + "Crumb" holen, dann langsam nacheinander abfragen.
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let YS = null;
-async function yahooSession() {
-  if (YS) return YS;
-  YS = { cookie: '', crumb: '' };
-  try {
-    const r = await fetch('https://fc.yahoo.com', { headers: UA, redirect: 'manual' });
-    const set = r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie') || ''];
-    YS.cookie = set.map((c) => c.split(';')[0]).filter(Boolean).join('; ');
-    const c = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', { headers: { ...UA, Cookie: YS.cookie } });
-    if (c.ok) YS.crumb = (await c.text()).trim();
-  } catch (e) { /* ohne Sitzung weiter */ }
-  return YS;
-}
-async function yahoo(sym, range = '3mo', interval = '60m') {
-  const ses = await yahooSession();
-  let lastErr;
-  for (const [i, host] of ['query1', 'query2', 'query1', 'query2'].entries()) {
-    try {
-      if (i) await sleep(1500 * i);
-      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false${ses.crumb ? `&crumb=${encodeURIComponent(ses.crumb)}` : ''}`;
-      const r = await fetch(url, { headers: { ...UA, Accept: 'application/json', ...(ses.cookie ? { Cookie: ses.cookie } : {}) } });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = await r.json();
-      const res = j.chart && j.chart.result && j.chart.result[0];
-      if (!res || !res.timestamp) throw new Error((j.chart && j.chart.error && j.chart.error.description) || 'keine Daten');
-      const q = res.indicators.quote[0];
-      const rows = res.timestamp.map((t, k) => ({ t: t * 1000, c: q.close[k], h: q.high[k], l: q.low[k], v: q.volume ? q.volume[k] : 0 }))
-        .filter((x) => x.c != null && x.h != null && x.l != null);
-      await sleep(400);
-      return { rows, meta: res.meta };
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr;
+// ---- Aktien über den TradingView-Screener (Yahoo/Stooq sperren GitHub-Server)
+// Liefert Kurs, Tages-/Wochenveränderung, Börsenstatus und Indikatoren im Stundenraster.
+const TV_COLS = ['close', 'currency', 'change', 'Perf.W', 'high', 'low', 'RSI|60', 'MACD.macd|60', 'MACD.signal|60',
+  'EMA20|60', 'EMA50|60', 'BB.lower|60', 'BB.upper|60', 'Volatility.D', 'current_session'];
+async function tradingView(screener, tickers, cols = TV_COLS) {
+  const r = await fetch(`https://scanner.tradingview.com/${screener}/scan`, {
+    method: 'POST', headers: { ...UA, 'Content-Type': 'application/json', Origin: 'https://www.tradingview.com' },
+    body: JSON.stringify({ symbols: { tickers }, columns: cols }),
+  });
+  if (!r.ok) throw new Error(`TradingView HTTP ${r.status}`);
+  const j = await r.json();
+  return Object.fromEntries((j.data || []).map((x) => [x.s, Object.fromEntries(cols.map((c, i) => [c, x.d[i]]))]));
 }
 
-// Ersatzquellen
 async function eurUsdFallback() {
   const j = await getJSON('https://api.frankfurter.app/latest?from=EUR&to=USD'); // EZB-Referenzkurs
   if (!j.rates || !j.rates.USD) throw new Error('kein Kurs');
   return j.rates.USD;
-}
-async function vixFallback() {
-  const j = await getJSON('https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json');
-  const v = j.data && (j.data.current_price || j.data.close);
-  if (!v) throw new Error('kein VIX');
-  return v;
 }
 
 async function rss(url, kind, tag, source) {
@@ -156,16 +125,6 @@ async function notify(S, text) {
 
 function loadJSON(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return fallback; } }
 
-// Tageskennung in Börsenzeit
-const dayKey = (t, off) => Math.floor((t + off * 1000) / 864e5);
-function changeDays(rows, days, off) {
-  const last = rows[rows.length - 1];
-  const keys = [...new Set(rows.map((r) => dayKey(r.t, off)))];
-  const target = keys[keys.length - 1 - days];
-  if (target == null) return null;
-  const prev = [...rows].reverse().find((r) => dayKey(r.t, off) === target);
-  return prev ? (last.c / prev.c - 1) * 100 : null;
-}
 
 // ================================================================ Hauptlauf
 (async () => {
@@ -186,28 +145,35 @@ function changeDays(rows, days, off) {
     } catch (e) { problems.push(`${L(s)}: keine Kurse (${e.message})`); }
   }
   let eurusd = null;
-  try { const fx = await yahoo('EURUSD=X', '5d', '60m'); eurusd = fx.meta.regularMarketPrice || fx.rows[fx.rows.length - 1].c; }
-  catch (e) { try { eurusd = await eurUsdFallback(); } catch (e2) { problems.push('EUR/USD-Kurs nicht abrufbar – US-Aktien ausgelassen.'); } }
-  for (const s of STOCKS) {
-    const us = ASSETS[s].market === 'US';
-    if (us && !eurusd) continue;
-    try {
-      const y = await yahoo(s);
-      const fx = y.meta.currency === 'EUR' ? 1 : y.meta.currency === 'USD' ? 1 / eurusd : null;
-      if (fx == null) throw new Error('Währung ' + y.meta.currency);
-      const rows = y.rows.map((r) => ({ t: r.t, c: r.c * fx, h: r.h * fx, l: r.l * fx, v: r.v }));
-      const per = y.meta.currentTradingPeriod && y.meta.currentTradingPeriod.regular;
-      const open = per ? now >= per.start * 1000 && now <= per.end * 1000 : false;
-      if (open && y.meta.regularMarketPrice) rows[rows.length - 1].c = y.meta.regularMarketPrice * fx;
-      market[s] = { rows, source: 'Yahoo', bpd: us ? 7 : 9, tradeable: open, off: y.meta.gmtoffset || 0 };
-    } catch (e) { problems.push(`${L(s)}: keine Kurse (${e.message})`); }
+  try { eurusd = await eurUsdFallback(); } catch (e) { problems.push('EUR/USD-Kurs nicht abrufbar – US-Aktien ausgelassen.'); }
+  const H = loadJSON(F.hist, {}); // eigener Kursverlauf der Aktien (TradingView liefert keine Historie)
+  let tv = {};
+  for (const [screener, mk] of [['america', 'US'], ['germany', 'DE']]) {
+    try { Object.assign(tv, await tradingView(screener, STOCKS.filter((s) => ASSETS[s].market === mk).map((s) => ASSETS[s].tv))); }
+    catch (e) { problems.push(`Aktien ${mk}: ${e.message}`); }
   }
+  for (const s of STOCKS) {
+    const d = tv[ASSETS[s].tv];
+    if (!d || d.close == null) { if (Object.keys(tv).length) problems.push(`${L(s)}: keine Kurse`); continue; }
+    const fx = d.currency === 'EUR' ? 1 : d.currency === 'USD' && eurusd ? 1 / eurusd : null;
+    if (fx == null) { problems.push(`${L(s)}: Währung ${d.currency} nicht umrechenbar`); continue; }
+    const p = d.close * fx;
+    const h = (H[s] = (H[s] || []).filter((x) => x[0] > now - 30 * 864e5));
+    const prev = h.length ? h[h.length - 1] : null;
+    const open = d.current_session === 'market';
+    if (!prev || open || Math.abs(prev[1] / p - 1) > 1e-6) h.push([now, sig(p)]);
+    market[s] = {
+      tv: d, fx, price: p, tradeable: open, source: 'TradingView', bpd: ASSETS[s].market === 'US' ? 7 : 9,
+      rows: h.map(([t, c]) => ({ t, c, h: c, l: c })),
+      hi: Math.max(p, prev ? prev[1] : p), lo: Math.min(p, prev ? prev[1] : p),
+    };
+  }
+  fs.writeFileSync(F.hist, JSON.stringify(H));
 
   // ---- Stimmung
   let fng = null, vix = null;
   try { fng = await Data.fearGreed(); } catch (e) { problems.push('Krypto Fear & Greed nicht abrufbar.'); }
-  try { const v = await yahoo('^VIX', '5d', '1d'); vix = v.meta.regularMarketPrice || v.rows[v.rows.length - 1].c; }
-  catch (e) { try { vix = await vixFallback(); } catch (e2) { problems.push('VIX nicht abrufbar.'); } }
+  try { const v = await tradingView('cfd', ['TVC:VIX'], ['close']); vix = v['TVC:VIX'].close; } catch (e) { problems.push('VIX nicht abrufbar.'); }
   const stockFng = vix != null ? Math.round(Math.max(0, Math.min(100, 100 - (vix - 10) * 4))) : null;
   const news = await loadNews(problems);
   const analysis = Strategy.analyzeNews(news, Object.keys(market), now);
@@ -215,14 +181,25 @@ function changeDays(rows, days, off) {
   // ---- Bewerten
   const evals = {}, quotes = {}, prices = {};
   for (const [s, m] of Object.entries(market)) {
-    const closes = m.rows.map((r) => r.c);
     const isC = ASSETS[s].type === 'crypto';
+    const ctxE = { news: analysis.perCoin[s], market: isC ? analysis.market : analysis.stockMarket, fng: isC ? (fng ? fng.value : null) : stockFng, barsPerDay: m.bpd };
+    if (m.tv) {
+      const d = m.tv;
+      m.price = prices[s] = m.price;
+      m.ev = evals[s] = Strategy.score({
+        price: d.close, ema20: d['EMA20|60'], ema50: d['EMA50|60'], rsi: d['RSI|60'],
+        hist: d['MACD.macd|60'] != null && d['MACD.signal|60'] != null ? d['MACD.macd|60'] - d['MACD.signal|60'] : null,
+        bbLower: d['BB.lower|60'], bbUpper: d['BB.upper|60'], mom: d.change, vol: d['Volatility.D'],
+      }, ctxE);
+      m.ch1d = d.change; m.ch7d = d['Perf.W'];
+      quotes[s] = { price: m.price, hi: m.hi, lo: m.lo, tradeable: m.tradeable };
+      continue;
+    }
+    const closes = m.rows.map((r) => r.c);
     m.price = prices[s] = closes[closes.length - 1];
-    m.ev = evals[s] = Strategy.evaluate(closes.slice(-200), {
-      news: analysis.perCoin[s], market: isC ? analysis.market : analysis.stockMarket, fng: isC ? (fng ? fng.value : null) : stockFng, barsPerDay: m.bpd,
-    });
-    m.ch1d = isC ? (closes.length > 24 ? (m.price / closes[closes.length - 25] - 1) * 100 : null) : changeDays(m.rows, 1, m.off);
-    m.ch7d = isC ? (closes.length > 168 ? (m.price / closes[closes.length - 169] - 1) * 100 : null) : changeDays(m.rows, 5, m.off);
+    m.ev = evals[s] = Strategy.evaluate(closes.slice(-200), ctxE);
+    m.ch1d = closes.length > 24 ? (m.price / closes[closes.length - 25] - 1) * 100 : null;
+    m.ch7d = closes.length > 168 ? (m.price / closes[closes.length - 169] - 1) * 100 : null;
     const recent = m.rows.filter((r) => r.t >= since - 3600e3);
     const rr = recent.length ? recent : m.rows.slice(-1);
     quotes[s] = { price: m.price, hi: Math.max(m.price, ...rr.map((r) => r.h)), lo: Math.min(m.price, ...rr.map((r) => r.l)), tradeable: m.tradeable };
@@ -253,10 +230,10 @@ function changeDays(rows, days, off) {
 
   // ---- Backtest (1x täglich)
   let bt = loadJSON(F.bt, null);
-  if (!bt || now - bt.at > 20 * 3600e3) {
+  if (!bt || now - bt.at > 20 * 3600e3 || !bt.scope) {
     try {
       const from = now - 30 * 864e5;
-      const series = Object.fromEntries(Object.entries(market).map(([s, m]) => [s, m.rows.filter((r) => r.t >= from - 12 * 864e5)]));
+      const series = Object.fromEntries(Object.entries(market).filter(([, m]) => !m.tv).map(([s, m]) => [s, m.rows.filter((r) => r.t >= from - 12 * 864e5)]));
       const res = Engine.backtest(series, START_CAPITAL, (s) => ({ barsPerDay: market[s].bpd }));
       const c = res.curve.filter((p) => p.t >= from);
       let peak = -Infinity, mdd = 0;
@@ -265,7 +242,7 @@ function changeDays(rows, days, off) {
       const step = Math.max(1, Math.floor(c.length / 300));
       const btcRef = market.BTC ? market.BTC.rows.filter((r) => r.t >= c[0].t) : [];
       bt = {
-        at: now, from: c[0].t, to: c[c.length - 1].t, start: c[0].v, end: c[c.length - 1].v, maxDD: mdd,
+        at: now, scope: 'crypto', from: c[0].t, to: c[c.length - 1].t, start: c[0].v, end: c[c.length - 1].v, maxDD: mdd,
         trades: closes.length, wins: closes.filter((t) => t.pnl > 0).length, longs: closes.filter((t) => t.side === 'LONG').length, shorts: closes.filter((t) => t.side === 'SHORT').length,
         liquidations: closes.filter((t) => /Liquidation/.test(t.reason)).length, fees: res.pf.trades.reduce((a, t) => a + (t.action === 'CLOSE' ? t.fee : 0), 0),
         btcHold: btcRef.length ? (btcRef[btcRef.length - 1].c / btcRef[0].c) * START_CAPITAL : null,
