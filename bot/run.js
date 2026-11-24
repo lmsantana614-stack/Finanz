@@ -1,247 +1,343 @@
-// Trading-Bot für GitHub Actions: läuft stündlich, handelt mit virtuellen 50 €,
-// schreibt STATUS.md und meldet Kaufsignale/Trades als Kommentar in einem GitHub-Issue
-// (-> Push-Benachrichtigung in der GitHub-App).
-// Nutzt dieselbe Strategie wie die Webseite (js/*.js).
+// Trading-Bot für GitHub Actions: Krypto + Aktien, Long/Short mit Hebel, virtuelle 50 €.
+// Schreibt bot/state.json (Depot), bot/market.json (für die Webseite), bot/backtest.json,
+// STATUS.md und meldet Trades/Signale als Kommentar im GitHub-Issue (-> Push-Nachricht).
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
-const STATE_FILE = path.join(__dirname, 'state.json');
-const STATUS_FILE = path.join(ROOT, 'STATUS.md');
+const F = { state: path.join(__dirname, 'state.json'), market: path.join(__dirname, 'market.json'), bt: path.join(__dirname, 'backtest.json'), status: path.join(ROOT, 'STATUS.md') };
 const START_CAPITAL = 50;
-const COIN_LIST = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK'];
-const DRY = process.argv.includes('--dry'); // lokal testen ohne GitHub-API
-const STATUS_URL = `https://github.com/${process.env.GITHUB_REPOSITORY || 'OWNER/REPO'}/blob/main/STATUS.md`;
+const DRY = process.argv.includes('--dry');
+const REPO = process.env.GITHUB_REPOSITORY || 'OWNER/REPO';
+const [OWNER, NAME] = REPO.split('/');
+const STATUS_URL = `https://github.com/${REPO}/blob/main/STATUS.md`;
+const SITE_URL = `https://raw.githack.com/${REPO}/main/index.html`;
+const UA = { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36' };
 
 // ---- Strategie-Code der Webseite laden
 const ctx = vm.createContext({ fetch, AbortController, setTimeout, clearTimeout, console });
 const lib = vm.runInContext(
-  ['js/indicators.js', 'js/data.js', 'js/strategy.js'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') +
-    '\n({ Ind, COINS, Data, Strategy, Engine, CONFIG })',
+  ['js/assets.js', 'js/indicators.js', 'js/data.js', 'js/strategy.js'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') +
+    '\n({ ASSETS, CRYPTO, STOCKS, Data, Strategy, Engine, CONFIG })',
   ctx
 );
-const { COINS, Data, Strategy, Engine, CONFIG } = lib;
+const { ASSETS, CRYPTO, STOCKS, Data, Strategy, Engine, CONFIG } = lib;
 
-// ---- Hilfen
 const eur = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v);
 const price = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumSignificantDigits: v < 1 ? 4 : 6 }).format(v);
-const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1).replace('.', ',')} %`;
+const pct = (v) => `${v > 0 ? '+' : ''}${(v ?? 0).toFixed(1).replace('.', ',')} %`;
 const when = (t) => new Date(t).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const md = (s) => String(s).replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').replace(/@/g, '@​');
-
-function loadState() {
-  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) { /* neu */ }
-  return { startCapital: START_CAPITAL, createdAt: Date.now(), pf: Engine.newPortfolio(START_CAPITAL), equityHistory: [], lastAction: {}, issue: null, runs: 0 };
-}
-
+const sig = (v) => Number(v.toPrecision(6));
 const decode = (s) => s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
   .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+const L = (s) => ASSETS[s].label;
 
-// ---- News: CryptoCompare, sonst RSS-Feeds (auf dem Server gibt es keine CORS-Probleme)
-async function loadNews() {
-  try {
-    const n = await Data.news(process.env.CRYPTOCOMPARE_KEY || '');
-    if (n.length) return { items: n, source: 'CryptoCompare' };
-  } catch (e) { /* Fallback */ }
-  const feeds = [
-    ['CoinDesk', 'https://www.coindesk.com/arc/outboundfeeds/rss/'],
-    ['Cointelegraph', 'https://cointelegraph.com/rss'],
-    ['Decrypt', 'https://decrypt.co/feed'],
-  ];
-  const items = [];
-  for (const [name, url] of feeds) {
-    try {
-      const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (trading-bot)' } });
-      if (!r.ok) continue;
-      const xml = await r.text();
-      for (const m of xml.matchAll(/<item[\s>][\s\S]*?<\/item>/g)) {
-        const get = (tag) => {
-          const x = m[0].match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
-          return x ? decode(x[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '')).trim() : '';
-        };
-        const t = Date.parse(get('pubDate')) || Date.now();
-        items.push({ t, title: get('title'), body: get('description').slice(0, 400), url: get('link'), source: name, tags: '' });
-      }
-    } catch (e) { /* nächster Feed */ }
-  }
-  items.sort((a, b) => b.t - a.t);
-  return { items, source: items.length ? 'RSS' : null };
-}
-
-// ---- GitHub-Issue für Benachrichtigungen
-async function gh(method, url, body) {
-  const r = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${url}`, {
-    method,
-    headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!r.ok) throw new Error(`GitHub ${method} ${url}: ${r.status} ${await r.text()}`);
+async function getJSON(url) {
+  const r = await fetch(url, { headers: UA });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
+// ---- Yahoo Finance (nur serverseitig, im Browser blockiert)
+async function yahoo(sym, range = '3mo', interval = '60m') {
+  let lastErr;
+  for (const host of ['query1', 'query2']) {
+    try {
+      const j = await getJSON(`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false`);
+      const res = j.chart && j.chart.result && j.chart.result[0];
+      if (!res || !res.timestamp) throw new Error((j.chart && j.chart.error && j.chart.error.description) || 'keine Daten');
+      const q = res.indicators.quote[0];
+      const rows = res.timestamp.map((t, i) => ({ t: t * 1000, c: q.close[i], h: q.high[i], l: q.low[i], v: q.volume ? q.volume[i] : 0 }))
+        .filter((r) => r.c != null && r.h != null && r.l != null);
+      return { rows, meta: res.meta };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+async function rss(url, kind, tag, source) {
+  const r = await fetch(url, { headers: UA });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const xml = await r.text();
+  const out = [];
+  for (const m of xml.matchAll(/<item[\s>][\s\S]*?<\/item>/g)) {
+    const get = (t) => { const x = m[0].match(new RegExp(`<${t}[^>]*>([\\s\\S]*?)</${t}>`)); return x ? decode(x[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '')).trim() : ''; };
+    out.push({ t: Date.parse(get('pubDate')) || Date.now(), title: get('title'), body: get('description').slice(0, 400), url: get('link'), source, tags: tag || '', kind });
+  }
+  return out;
+}
+
+async function loadNews(problems) {
+  let crypto = [];
+  try { crypto = (await Data.news(process.env.CRYPTOCOMPARE_KEY || '')).map((n) => ({ ...n, kind: 'crypto' })); } catch (e) { /* RSS */ }
+  if (!crypto.length) {
+    for (const [n, u] of [['CoinDesk', 'https://www.coindesk.com/arc/outboundfeeds/rss/'], ['Cointelegraph', 'https://cointelegraph.com/rss'], ['Decrypt', 'https://decrypt.co/feed']]) {
+      try { crypto.push(...(await rss(u, 'crypto', '', n))); } catch (e) { /* nächster */ }
+    }
+  }
+  const stock = [];
+  for (const s of STOCKS) {
+    try { stock.push(...(await rss(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(s)}&region=US&lang=en-US`, 'stock', s.toUpperCase(), 'Yahoo Finance'))); } catch (e) { /* weiter */ }
+  }
+  if (!crypto.length) problems.push('Keine Krypto-News abrufbar.');
+  if (!stock.length) problems.push('Keine Aktien-News abrufbar.');
+  // Duplikate (gleicher Titel) zusammenführen
+  const seen = new Map();
+  for (const n of [...crypto, ...stock]) {
+    const k = n.title.toLowerCase();
+    if (seen.has(k)) { const o = seen.get(k); if (n.tags && !o.tags.split('|').includes(n.tags)) o.tags = o.tags ? `${o.tags}|${n.tags}` : n.tags; }
+    else seen.set(k, { ...n });
+  }
+  return [...seen.values()].sort((a, b) => b.t - a.t);
+}
+
+async function gh(method, url, body) {
+  const r = await fetch(`https://api.github.com/repos/${REPO}${url}`, {
+    method, headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(`GitHub ${method} ${url}: ${r.status}`);
+  return r.json();
+}
 async function notify(S, text) {
-  const owner = process.env.GITHUB_REPOSITORY_OWNER;
-  const msg = `@${owner}\n\n${text}`;
+  const msg = `@${OWNER}\n\n${text}`;
   if (DRY || !process.env.GITHUB_TOKEN) { console.log('--- Benachrichtigung ---\n' + msg); return; }
   if (!S.issue) {
-    const iss = await gh('POST', '/issues', {
-      title: '🔔 Trading-Bot: Signale & Trades',
-      body: `@${owner} Hier meldet sich dein Trading-Bot, sobald er etwas kaufen oder verkaufen würde.\n\n` +
-        'Den aktuellen Stand siehst du jederzeit in [STATUS.md](${STATUS_URL}).\n\n' +
-        '_Papier-Trading mit virtuellem Geld – keine Anlageberatung._',
-    });
+    const iss = await gh('POST', '/issues', { title: '🔔 Trading-Bot: Signale & Trades', body: `@${OWNER} Hier meldet sich dein Trading-Bot bei jedem Trade und Signal.\n\nWebseite: ${SITE_URL}\nStatus: ${STATUS_URL}` });
     S.issue = iss.number;
   }
   await gh('POST', `/issues/${S.issue}/comments`, { body: msg });
 }
 
-// ---- Hauptlauf
+function loadJSON(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return fallback; } }
+
+// Tageskennung in Börsenzeit
+const dayKey = (t, off) => Math.floor((t + off * 1000) / 864e5);
+function changeDays(rows, days, off) {
+  const last = rows[rows.length - 1];
+  const keys = [...new Set(rows.map((r) => dayKey(r.t, off)))];
+  const target = keys[keys.length - 1 - days];
+  if (target == null) return null;
+  const prev = [...rows].reverse().find((r) => dayKey(r.t, off) === target);
+  return prev ? (last.c / prev.c - 1) * 100 : null;
+}
+
+// ================================================================ Hauptlauf
 (async () => {
-  const S = loadState();
   const now = Date.now();
   const problems = [];
-  const syms = [...new Set([...COIN_LIST, ...Object.keys(S.pf.positions)])];
+  let S = loadJSON(F.state, null);
+  if (!S || !S.pf || S.pf.version !== 2) {
+    S = { startCapital: START_CAPITAL, createdAt: now, pf: Engine.newPortfolio(START_CAPITAL), equityHistory: [], lastAction: {}, signals: [], issue: S ? S.issue : null, runs: 0, restarted: !!S };
+  }
+  const since = S.lastRun || now - 3600e3;
 
+  // ---- Kurse
   const market = {};
-  for (const sym of syms) {
-    try { market[sym] = await Data.candles(sym, 250, process.env.CRYPTOCOMPARE_KEY || ''); }
-    catch (e) { problems.push(`${sym}: keine Kurse (${e.message})`); }
+  for (const s of CRYPTO) {
+    try {
+      const d = await Data.candles(s, 720, process.env.CRYPTOCOMPARE_KEY || '');
+      market[s] = { rows: d.rows, source: d.source, bpd: 24, tradeable: true, off: 0 };
+    } catch (e) { problems.push(`${L(s)}: keine Kurse (${e.message})`); }
   }
-  const news = await loadNews();
-  if (!news.source) problems.push('Keine News abrufbar – Entscheidung nur technisch.');
-  let fng = null;
-  try { fng = await Data.fearGreed(); } catch (e) { problems.push('Fear & Greed nicht abrufbar.'); }
+  let eurusd = null;
+  try { const fx = await yahoo('EURUSD=X', '5d', '60m'); eurusd = fx.meta.regularMarketPrice || fx.rows[fx.rows.length - 1].c; }
+  catch (e) { problems.push('EUR/USD-Kurs nicht abrufbar – US-Aktien ausgelassen.'); }
+  for (const s of STOCKS) {
+    const us = ASSETS[s].market === 'US';
+    if (us && !eurusd) continue;
+    try {
+      const y = await yahoo(s);
+      const fx = y.meta.currency === 'EUR' ? 1 : y.meta.currency === 'USD' ? 1 / eurusd : null;
+      if (fx == null) throw new Error('Währung ' + y.meta.currency);
+      const rows = y.rows.map((r) => ({ t: r.t, c: r.c * fx, h: r.h * fx, l: r.l * fx, v: r.v }));
+      const per = y.meta.currentTradingPeriod && y.meta.currentTradingPeriod.regular;
+      const open = per ? now >= per.start * 1000 && now <= per.end * 1000 : false;
+      if (open && y.meta.regularMarketPrice) rows[rows.length - 1].c = y.meta.regularMarketPrice * fx;
+      market[s] = { rows, source: 'Yahoo', bpd: us ? 7 : 9, tradeable: open, off: y.meta.gmtoffset || 0 };
+    } catch (e) { problems.push(`${L(s)}: keine Kurse (${e.message})`); }
+  }
 
-  const analysis = Strategy.analyzeNews(news.items, Object.keys(market), now);
-  const prices = {}, evals = {};
-  for (const [sym, m] of Object.entries(market)) {
+  // ---- Stimmung
+  let fng = null, vix = null;
+  try { fng = await Data.fearGreed(); } catch (e) { problems.push('Krypto Fear & Greed nicht abrufbar.'); }
+  try { const v = await yahoo('^VIX', '5d', '1d'); vix = v.meta.regularMarketPrice || v.rows[v.rows.length - 1].c; } catch (e) { problems.push('VIX nicht abrufbar.'); }
+  const stockFng = vix != null ? Math.round(Math.max(0, Math.min(100, 100 - (vix - 10) * 4))) : null;
+  const news = await loadNews(problems);
+  const analysis = Strategy.analyzeNews(news, Object.keys(market), now);
+
+  // ---- Bewerten
+  const evals = {}, quotes = {}, prices = {};
+  for (const [s, m] of Object.entries(market)) {
     const closes = m.rows.map((r) => r.c);
-    prices[sym] = closes[closes.length - 1];
-    m.price = prices[sym];
-    m.ch24 = closes.length > 24 ? (prices[sym] / closes[closes.length - 25] - 1) * 100 : 0;
-    m.ev = Strategy.evaluate(closes, { news: analysis.perCoin[sym], market: analysis.market, fng: fng ? fng.value : null });
-    evals[sym] = m.ev;
+    const isC = ASSETS[s].type === 'crypto';
+    m.price = prices[s] = closes[closes.length - 1];
+    m.ev = evals[s] = Strategy.evaluate(closes.slice(-200), {
+      news: analysis.perCoin[s], market: isC ? analysis.market : analysis.stockMarket, fng: isC ? (fng ? fng.value : null) : stockFng, barsPerDay: m.bpd,
+    });
+    m.ch1d = isC ? (closes.length > 24 ? (m.price / closes[closes.length - 25] - 1) * 100 : null) : changeDays(m.rows, 1, m.off);
+    m.ch7d = isC ? (closes.length > 168 ? (m.price / closes[closes.length - 169] - 1) * 100 : null) : changeDays(m.rows, 5, m.off);
+    const recent = m.rows.filter((r) => r.t >= since - 3600e3);
+    const rr = recent.length ? recent : m.rows.slice(-1);
+    quotes[s] = { price: m.price, hi: Math.max(m.price, ...rr.map((r) => r.h)), lo: Math.min(m.price, ...rr.map((r) => r.l)), tradeable: m.tradeable };
   }
-  // Ohne Kurs für eine gehaltene Position nicht handeln (sonst falscher Depotwert)
   const missingHeld = Object.keys(S.pf.positions).filter((s) => !prices[s]);
+  if (missingHeld.length) problems.push(`Kein Kurs für gehaltene Position(en): ${missingHeld.join(', ')} – kein Handel in diesem Lauf.`);
   const canTrade = Object.keys(prices).length > 0 && !missingHeld.length;
 
-  // Neue Kaufsignale erkennen
-  const newBuys = [];
-  for (const [sym, ev] of Object.entries(evals)) {
-    if (S.lastAction[sym] !== ev.action && ev.action === 'KAUFEN') newBuys.push(sym);
-    S.lastAction[sym] = ev.action;
+  // ---- Signale protokollieren
+  const newSignals = [];
+  for (const [s, ev] of Object.entries(evals)) {
+    if (S.lastAction[s] !== ev.action) {
+      if (ev.action === 'KAUFEN' || ev.action === 'SHORT') newSignals.push(s);
+      S.signals.unshift({ t: now, sym: s, action: ev.action, score: ev.score, lev: ev.lev, price: sig(prices[s]), reasons: ev.reasons.slice(0, 4) });
+      S.lastAction[s] = ev.action;
+    }
   }
+  S.signals = S.signals.slice(0, 300);
 
-  // Handeln
+  // ---- Handeln
   const executed = [];
-  if (canTrade) {
-    for (const o of Engine.decide(S.pf, evals, prices, now)) executed.push(Engine.execute(S.pf, o, prices[o.sym], now));
-  }
-
+  if (canTrade) for (const o of Engine.decide(S.pf, evals, quotes, now)) executed.push(Engine.execute(S.pf, o, now));
   const equity = Engine.equity(S.pf, prices);
   if (canTrade) S.equityHistory.push({ t: now, v: Math.round(equity * 100) / 100 });
-  S.equityHistory = S.equityHistory.slice(-2000);
+  S.equityHistory = S.equityHistory.slice(-3000);
   S.runs = (S.runs || 0) + 1;
   S.lastRun = now;
 
-  // Benachrichtigung
-  const lines = [];
-  if (!S.issue) lines.push('👋 **Dein Trading-Bot ist gestartet!** Ab jetzt prüft er jede Stunde Kurse, News und Marktstimmung und meldet sich hier, sobald er etwas kauft, verkauft oder kaufen würde.');
-  for (const tr of executed) {
-    if (tr.side === 'BUY') lines.push(`🟢 **Gekauft: ${tr.sym}** für ${eur(tr.eur)} zu ${price(tr.price)}\n> ${md(tr.reason)}`);
-    else lines.push(`🔴 **Verkauft: ${tr.sym}** für ${eur(tr.eur)} zu ${price(tr.price)} → ${tr.pnl >= 0 ? 'Gewinn' : 'Verlust'} **${tr.pnl >= 0 ? '+' : ''}${eur(tr.pnl)}**\n> ${md(tr.reason)}`);
+  // ---- Backtest (1x täglich)
+  let bt = loadJSON(F.bt, null);
+  if (!bt || now - bt.at > 20 * 3600e3) {
+    try {
+      const from = now - 30 * 864e5;
+      const series = Object.fromEntries(Object.entries(market).map(([s, m]) => [s, m.rows.filter((r) => r.t >= from - 12 * 864e5)]));
+      const res = Engine.backtest(series, START_CAPITAL, (s) => ({ barsPerDay: market[s].bpd }));
+      const c = res.curve.filter((p) => p.t >= from);
+      let peak = -Infinity, mdd = 0;
+      c.forEach((p) => { peak = Math.max(peak, p.v); mdd = Math.max(mdd, (peak - p.v) / peak); });
+      const closes = res.pf.trades.filter((t) => t.action === 'CLOSE');
+      const step = Math.max(1, Math.floor(c.length / 300));
+      const btcRef = market.BTC ? market.BTC.rows.filter((r) => r.t >= c[0].t) : [];
+      bt = {
+        at: now, from: c[0].t, to: c[c.length - 1].t, start: c[0].v, end: c[c.length - 1].v, maxDD: mdd,
+        trades: closes.length, wins: closes.filter((t) => t.pnl > 0).length, longs: closes.filter((t) => t.side === 'LONG').length, shorts: closes.filter((t) => t.side === 'SHORT').length,
+        liquidations: closes.filter((t) => /Liquidation/.test(t.reason)).length, fees: res.pf.trades.reduce((a, t) => a + (t.action === 'CLOSE' ? t.fee : 0), 0),
+        btcHold: btcRef.length ? (btcRef[btcRef.length - 1].c / btcRef[0].c) * START_CAPITAL : null,
+        curve: c.filter((_, i) => i % step === 0 || i === c.length - 1).map((p) => [p.t, Math.round(p.v * 100) / 100]),
+      };
+      fs.writeFileSync(F.bt, JSON.stringify(bt));
+    } catch (e) { problems.push('Backtest fehlgeschlagen: ' + e.message); }
   }
-  for (const sym of newBuys) {
-    if (executed.some((t) => t.sym === sym && t.side === 'BUY')) continue;
-    const m = market[sym];
-    const why = S.pf.positions[sym] ? 'schon im Depot' : Object.keys(S.pf.positions).length >= CONFIG.maxPositions ? 'max. Positionen erreicht' : 'gerade kein freies Geld';
-    lines.push(`🔔 **Kaufsignal: ${sym}** (${COINS[sym].name}) zu ${price(m.price)}, Score ${m.ev.score} – nicht gekauft, ${why}\n> ${md(m.ev.reasons.slice(0, 3).join(' · '))}`);
+
+  // ---- Benachrichtigen
+  const lines = [];
+  if (S.restarted) { lines.push('🚀 **Upgrade:** Der Bot handelt jetzt **Krypto und Aktien**, **Long und Short mit bis zu ' + CONFIG.maxLeverage + 'x Hebel**. Neustart mit 50 €.\n\n🌐 Webseite: ' + SITE_URL); delete S.restarted; }
+  if (!S.issue && !lines.length) lines.push('👋 **Dein Trading-Bot ist gestartet!**');
+  for (const t of executed) {
+    const dirTxt = t.side === 'SHORT' ? 'Short' : 'Long';
+    if (t.action === 'OPEN') lines.push(`${t.side === 'SHORT' ? '🔻' : '🟢'} **${dirTxt} ${L(t.sym)} ${t.lev}x** – Einsatz ${eur(t.eur)} (Volumen ${eur(t.volume)}) zu ${price(t.price)}\n> ${md(t.reason)}`);
+    else lines.push(`${t.pnl >= 0 ? '💰' : '🔴'} **${dirTxt} ${L(t.sym)} ${t.lev}x geschlossen** zu ${price(t.price)} → **${t.pnl >= 0 ? '+' : ''}${eur(t.pnl)}** (${pct(t.roe * 100)} auf Einsatz)\n> ${md(t.reason)}`);
+  }
+  for (const s of newSignals) {
+    if (executed.some((t) => t.sym === s && t.action === 'OPEN')) continue;
+    const ev = evals[s];
+    const why = !market[s].tradeable ? 'Börse geschlossen' : S.pf.positions[s] ? 'schon im Depot' : Object.keys(S.pf.positions).length >= CONFIG.maxPositions ? 'max. Positionen erreicht' : S.pf.lastSell[s] && now - S.pf.lastSell[s] < CONFIG.cooldownH * 3600e3 ? 'Abkühlphase' : 'kein freies Geld';
+    lines.push(`🔔 **${ev.action === 'SHORT' ? 'Short' : 'Kauf'}-Signal ${L(s)}** (${ASSETS[s].name}) zu ${price(prices[s])}, Score ${ev.score}, ${ev.lev}x – nicht ausgeführt: ${why}\n> ${md(ev.reasons.slice(0, 3).join(' · '))}`);
   }
   if (lines.length) {
     const pnl = equity - S.startCapital;
-    await notify(S, `${lines.join('\n\n')}\n\n**Depot:** ${eur(equity)} (${pnl >= 0 ? '+' : ''}${eur(pnl)}) · Bargeld ${eur(S.pf.cash)} · [Status ansehen](${STATUS_URL})`)
+    await notify(S, `${lines.join('\n\n')}\n\n**Depot:** ${eur(equity)} (${pnl >= 0 ? '+' : ''}${eur(pnl)}) · [Webseite](${SITE_URL}) · [Status](${STATUS_URL})`)
       .catch((e) => problems.push('Benachrichtigung fehlgeschlagen: ' + e.message));
   }
 
-  fs.writeFileSync(STATE_FILE, JSON.stringify(S, null, 1));
-  fs.writeFileSync(STATUS_FILE, renderStatus(S, market, prices, equity, analysis, news, fng, problems, canTrade));
-  console.log(`Lauf ${S.runs}: Depot ${eur(equity)}, ${executed.length} Trades, ${newBuys.length} neue Kaufsignale, Quellen: ${[...new Set(Object.values(market).map((m) => m.source))].join(', ')}, News: ${news.source} (${news.items.length})`);
+  // ---- Daten für die Webseite
+  const plan = Engine.decide(JSON.parse(JSON.stringify(S.pf)), evals, Object.fromEntries(Object.entries(quotes).map(([s, q]) => [s, { ...q, hi: q.price, lo: q.price, tradeable: true }])), now)
+    .filter((o) => o.action === 'OPEN').map((o) => ({ sym: o.sym, side: o.side, lev: o.lev, margin: o.margin }));
+  const out = {
+    updatedAt: now, eurusd, fng, vix, stockFng, problems,
+    sources: [...new Set(Object.values(market).map((m) => m.source))],
+    newsMood: { crypto: analysis.market, stocks: analysis.stockMarket, count: analysis.count },
+    plan,
+    config: { ...CONFIG },
+    assets: Object.fromEntries(Object.entries(market).map(([s, m]) => {
+      const ev = m.ev, n = analysis.perCoin[s];
+      const sparkRows = m.rows.filter((r) => r.t >= now - 7 * 864e5);
+      return [s, {
+        type: ASSETS[s].type, market: ASSETS[s].market || 'Krypto', name: ASSETS[s].name, label: L(s), cap: ASSETS[s].cap,
+        price: sig(m.price), ch1d: m.ch1d, ch7d: m.ch7d, tradeable: m.tradeable, source: m.source,
+        score: ev.score, action: ev.action, lev: ev.lev, reasons: ev.reasons, rsi: ev.ind.rsi, vol: ev.ind.vol,
+        news: { score: n ? n.score : 0, count: n ? n.count : 0 },
+        spark: sparkRows.map((r) => [r.t, sig(r.c)]),
+      }];
+    })),
+    news: news.slice(0, 80).map((n) => ({ t: n.t, title: n.title, url: /^https:\/\//.test(n.url || '') ? n.url : null, source: n.source, kind: n.kind, score: Math.round(Strategy.headlineScore(n) * 100) / 100, syms: Object.keys(market).filter((s) => Strategy.mentions(n, s)) })),
+  };
+  fs.writeFileSync(F.market, JSON.stringify(out));
+  fs.writeFileSync(F.state, JSON.stringify(S));
+  fs.writeFileSync(F.status, renderStatus(S, out, equity, bt, canTrade));
+  console.log(`Lauf ${S.runs}: Depot ${eur(equity)}, ${executed.length} Trades, ${newSignals.length} neue Signale, ${Object.keys(market).length} Kurse (${out.sources.join(', ')}), ${news.length} News`);
   if (problems.length) console.log('Hinweise:\n' + problems.join('\n'));
 })().catch((e) => { console.error(e); process.exit(1); });
 
-function renderStatus(S, market, prices, equity, analysis, news, fng, problems, canTrade) {
+function renderStatus(S, M, equity, bt, canTrade) {
   const pnl = equity - S.startCapital;
-  const closed = S.pf.trades.filter((t) => t.side === 'SELL');
+  const closed = S.pf.trades.filter((t) => t.action === 'CLOSE');
   const wins = closed.filter((t) => t.pnl > 0).length;
-  const fngDe = fng ? ({ 'Extreme Fear': 'Extreme Angst', Fear: 'Angst', Neutral: 'Neutral', Greed: 'Gier', 'Extreme Greed': 'Extreme Gier' }[fng.label] || fng.label) : null;
-  const act = { KAUFEN: '🟢 KAUFEN', VERKAUFEN: '🔴 VERKAUFEN', HALTEN: '⚪ HALTEN' };
+  const A = M.assets;
+  const act = { KAUFEN: '🟢 LONG', SHORT: '🔻 SHORT', VERKAUFEN: '🔴 VERKAUFEN', HALTEN: '⚪ HALTEN' };
+  const tile = (v) => (v == null ? '⬜' : v >= 3 ? '🟩' : v >= 0.5 ? '🟢' : v > -0.5 ? '⚪' : v > -3 ? '🔴' : '🟥');
   const o = [];
-  o.push('# 📊 Trading-Bot – Status', '');
-  o.push(`**Stand:** ${when(S.lastRun)} Uhr · aktualisiert sich stündlich · Lauf Nr. ${S.runs}`, '');
+  o.push('# 📊 Trading-Bot – Status', '', `### 🌐 [Zur Webseite mit Heatmap & Charts](${SITE_URL})`, '');
+  o.push(`**Stand:** ${when(S.lastRun)} Uhr · Lauf Nr. ${S.runs} · Krypto + Aktien · Long/Short bis ${CONFIG.maxLeverage}x Hebel`, '');
   if (!canTrade) o.push('> ⚠️ In diesem Lauf fehlten Kursdaten – es wurde nicht gehandelt.', '');
-  o.push('| Depotwert | Gewinn / Verlust | Bargeld | Abgeschl. Trades | Marktstimmung |', '|---|---|---|---|---|');
-  o.push(`| **${eur(equity)}** | **${pnl >= 0 ? '+' : ''}${eur(pnl)}** (${pct((pnl / S.startCapital) * 100)}) | ${eur(S.pf.cash)} | ${closed.length}${closed.length ? ` (${Math.round((wins / closed.length) * 100)} % Gewinner)` : ''} | ${fng ? `${fng.value} – ${fngDe}` : '–'} |`, '');
-  o.push(`Gestartet mit ${eur(S.startCapital)} am ${new Date(S.createdAt).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}.`, '');
+  o.push('| Depotwert | Gewinn / Verlust | Frei | Abgeschl. Trades | Krypto-Stimmung | Aktien-Stimmung (VIX) |', '|---|---|---|---|---|---|');
+  o.push(`| **${eur(equity)}** | **${pnl >= 0 ? '+' : ''}${eur(pnl)}** (${pct((pnl / S.startCapital) * 100)}) | ${eur(S.pf.cash)} | ${closed.length}${closed.length ? ` (${Math.round((wins / closed.length) * 100)} % Gewinner)` : ''} | ${M.fng ? M.fng.value + '/100' : '–'} | ${M.stockFng != null ? `${M.stockFng}/100 (VIX ${M.vix.toFixed(1)})` : '–'} |`, '');
 
-  o.push('## 🔔 Was der Bot jetzt kaufen würde', '');
-  const buys = Object.entries(market).filter(([, m]) => m.ev.action === 'KAUFEN').sort((a, b) => b[1].ev.score - a[1].ev.score);
-  if (!buys.length) o.push('Aktuell kein Kaufsignal – der Bot wartet auf eine bessere Gelegenheit.', '');
-  for (const [sym, m] of buys) {
-    const held = S.pf.positions[sym] ? ' ✅ im Depot' : '';
-    o.push(`- **${sym}** (${COINS[sym].name}) zu ${price(m.price)} · Score **${m.ev.score}**${held}  `, `  ${md(m.ev.reasons.slice(0, 4).join(' · '))}`);
+  o.push('## 🔔 Was der Bot jetzt tun würde', '');
+  const sigs = Object.entries(A).filter(([, a]) => a.action === 'KAUFEN' || a.action === 'SHORT').sort((a, b) => Math.abs(b[1].score) - Math.abs(a[1].score));
+  if (!sigs.length) o.push('Kein Signal – der Bot wartet auf eine bessere Gelegenheit.', '');
+  for (const [s, a] of sigs) {
+    const plan = M.plan.find((p) => p.sym === s);
+    o.push(`- ${act[a.action]} **${a.label}** (${a.name}) ${a.lev}x zu ${price(a.price)} · Score **${a.score}**${S.pf.positions[s] ? ' · ✅ im Depot' : plan ? ` · Einsatz ${eur(plan.margin)}` : !a.tradeable ? ' · Börse zu' : ''}  `, `  ${md(a.reasons.slice(0, 4).join(' · '))}`);
   }
   o.push('');
 
   o.push('## 💼 Offene Positionen', '');
   const pos = Object.entries(S.pf.positions);
-  if (!pos.length) o.push('Keine – alles in Bargeld.', '');
+  if (!pos.length) o.push('Keine – alles frei.', '');
   else {
-    o.push('| Coin | Gekauft | Einstand | Aktuell | Wert | G/V |', '|---|---|---|---|---|---|');
-    for (const [sym, p] of pos) {
-      const cur = prices[sym] || p.avgPrice, val = p.qty * cur, g = val - p.invested;
-      o.push(`| **${sym}** | ${when(p.openedAt)} | ${price(p.avgPrice)} | ${price(cur)} | ${eur(val)} | ${g >= 0 ? '🟢 +' : '🔴 '}${eur(g)} (${pct((g / p.invested) * 100)}) |`);
+    o.push('| Anlage | Richtung | Einsatz | Einstieg | Aktuell | G/V | Stop | Liquidation |', '|---|---|---|---|---|---|---|---|');
+    for (const [s, p] of pos) {
+      const cur = A[s] ? A[s].price : p.entry, val = Engine.value(p, cur), g = val - p.invested, lv = Engine.levels(p);
+      o.push(`| **${L(s)}** | ${p.side === 'SHORT' ? '🔻 Short' : '🟢 Long'} ${p.lev}x | ${eur(p.invested)} | ${price(p.entry)} | ${price(cur)} | ${g >= 0 ? '+' : ''}${eur(g)} (${pct((g / p.invested) * 100)}) | ${price(lv.stop)} | ${price(lv.liq)} |`);
     }
     o.push('');
   }
 
-  const hist = S.equityHistory.slice(-48);
-  if (hist.length >= 3) {
-    const vals = hist.map((h) => h.v);
-    const lo = Math.floor(Math.min(...vals, S.startCapital) * 0.98), hi = Math.ceil(Math.max(...vals, S.startCapital) * 1.02);
-    o.push('## 📈 Depotverlauf (letzte 48 Läufe)', '', '```mermaid', 'xychart-beta', `  y-axis "€" ${lo} --> ${hi}`,
-      `  x-axis [${hist.map((h, i) => (i % 8 === 0 || i === hist.length - 1 ? `"${when(h.t).replace(',', '')}"` : '" "')).join(', ')}]`,
-      `  line [${vals.join(', ')}]`, '```', '');
+  o.push('## 🗺️ Heatmap (1 Tag)', '');
+  for (const type of ['crypto', 'stock']) {
+    const items = Object.values(A).filter((a) => a.type === type).sort((a, b) => b.cap - a.cap);
+    o.push(`**${type === 'crypto' ? 'Krypto' : 'Aktien'}:** ` + items.map((a) => `${tile(a.ch1d)} ${a.label} ${a.ch1d == null ? '' : pct(a.ch1d)}`).join(' · '), '');
   }
 
-  o.push('## 🧭 Marktübersicht', '', '| Coin | Kurs | 24h | RSI | News | Score | Empfehlung |', '|---|---|---|---|---|---|---|');
-  for (const [sym, m] of Object.entries(market).sort((a, b) => b[1].ev.score - a[1].ev.score)) {
-    const n = analysis.perCoin[sym];
-    const ns = n && n.count ? `${n.score > 0.05 ? '▲' : n.score < -0.05 ? '▼' : '●'} ${n.count}` : '–';
-    o.push(`| **${sym}** | ${price(m.price)} | ${pct(m.ch24)} | ${m.ev.ind.rsi != null ? m.ev.ind.rsi.toFixed(0) : '–'} | ${ns} | ${m.ev.score} | ${act[m.ev.action]} |`);
+  o.push('## 🧭 Marktübersicht', '', '| Anlage | Kurs | 1 Tag | 7 Tage | RSI | Score | Signal | Hebel |', '|---|---|---|---|---|---|---|---|');
+  for (const a of Object.values(A).sort((x, y) => y.score - x.score)) {
+    o.push(`| **${a.label}** ${a.type === 'stock' && !a.tradeable ? '🌙' : ''} | ${price(a.price)} | ${a.ch1d == null ? '–' : pct(a.ch1d)} | ${a.ch7d == null ? '–' : pct(a.ch7d)} | ${a.rsi != null ? a.rsi.toFixed(0) : '–'} | ${a.score} | ${act[a.action]} | ${a.lev}x |`);
   }
-  o.push('', 'Score ab +35 → Kaufen, ab −20 → Verkaufen. Er setzt sich zusammen aus Trend, MACD, RSI, Bollinger-Bändern, 24h-Bewegung, News-Stimmung und Fear & Greed.', '');
+  o.push('', '🌙 = Börse gerade geschlossen. Score ≥ +35 → Long, ≤ −40 → Short. Hebel 1–5x je nach Signalstärke und Schwankung.', '');
 
   o.push('## 🧾 Letzte Trades', '');
   const tr = S.pf.trades.slice(-15).reverse();
   if (!tr.length) o.push('Noch keine Trades.', '');
   else {
-    o.push('| Zeit | Aktion | Coin | Betrag | Kurs | Ergebnis |', '|---|---|---|---|---|---|');
-    for (const t of tr) o.push(`| ${when(t.t)} | ${t.side === 'BUY' ? '🟢 Kauf' : '🔴 Verkauf'} | ${t.sym} | ${eur(t.eur)} | ${price(t.price)} | ${t.side === 'SELL' ? `${t.pnl >= 0 ? '+' : ''}${eur(t.pnl)}` : ''} |`);
+    o.push('| Zeit | Aktion | Anlage | Kurs | Ergebnis |', '|---|---|---|---|---|');
+    for (const t of tr) o.push(`| ${when(t.t)} | ${t.action === 'OPEN' ? (t.side === 'SHORT' ? '🔻 Short auf' : '🟢 Long auf') : '⏹ Zu'} ${t.lev}x | ${L(t.sym)} | ${price(t.price)} | ${t.action === 'CLOSE' ? `${t.pnl >= 0 ? '+' : ''}${eur(t.pnl)} (${md(t.reason)})` : `Einsatz ${eur(t.eur)}`} |`);
     o.push('');
   }
-
-  o.push(`## 📰 Aktuelle News${news.source ? ` (${news.source})` : ''}`, '');
-  const top = news.items.slice(0, 10);
-  if (!top.length) o.push('Keine News abrufbar.', '');
-  for (const n of top) {
-    const s = Strategy.headlineScore(n);
-    const link = /^https:\/\//.test(n.url || '') ? `[${md(n.title)}](${n.url})` : md(n.title);
-    o.push(`- ${s > 0.1 ? '▲' : s < -0.1 ? '▼' : '●'} ${link} – _${md(n.source)}, ${when(n.t)}_`);
-  }
-  o.push('');
-  if (problems.length) o.push('<details><summary>Technische Hinweise</summary>', '', ...problems.map((p) => `- ${md(p)}`), '', '</details>', '');
-  o.push('---', '_Papier-Trading mit virtuellem Geld. Automatisch berechnete Signale, keine Anlageberatung. Kryptowährungen sind hochriskant._', '');
+  if (bt) o.push('## 🧪 Backtest (letzte 30 Tage)', '', `Aus 50 € wären **${eur(bt.end)}** geworden (${pct((bt.end / 50 - 1) * 100)}), ${bt.trades} Trades, ${bt.trades ? Math.round((bt.wins / bt.trades) * 100) : 0} % Gewinner, max. Rückgang ${pct(-bt.maxDD * 100)}.${bt.btcHold ? ` Zum Vergleich BTC halten: ${eur(bt.btcHold)}.` : ''}`, '');
+  if (M.problems.length) o.push('<details><summary>Technische Hinweise</summary>', '', ...M.problems.map((p) => `- ${md(p)}`), '', '</details>', '');
+  o.push('---', '_Papier-Trading mit virtuellem Geld. Hebel vervielfacht Gewinne und Verluste. Keine Anlageberatung._', '');
   return o.join('\n');
 }

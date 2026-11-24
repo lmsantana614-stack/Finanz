@@ -1,16 +1,5 @@
 // Datenquellen: Kurse, News und Marktstimmung (alle kostenlos & CORS-fähig).
-const COINS = {
-  BTC: { name: 'Bitcoin', gecko: 'bitcoin', aliases: ['bitcoin', 'btc'] },
-  ETH: { name: 'Ethereum', gecko: 'ethereum', aliases: ['ethereum', 'eth', 'ether'] },
-  SOL: { name: 'Solana', gecko: 'solana', aliases: ['solana', 'sol'] },
-  XRP: { name: 'XRP', gecko: 'ripple', aliases: ['xrp', 'ripple'] },
-  ADA: { name: 'Cardano', gecko: 'cardano', aliases: ['cardano', 'ada'] },
-  DOGE: { name: 'Dogecoin', gecko: 'dogecoin', aliases: ['dogecoin', 'doge'] },
-  AVAX: { name: 'Avalanche', gecko: 'avalanche-2', aliases: ['avalanche', 'avax'] },
-  LINK: { name: 'Chainlink', gecko: 'chainlink', aliases: ['chainlink', 'link'] },
-  DOT: { name: 'Polkadot', gecko: 'polkadot', aliases: ['polkadot', 'dot'] },
-  BNB: { name: 'BNB', gecko: 'binancecoin', aliases: ['bnb', 'binance coin'] },
-};
+// Anlagen-Liste: siehe js/assets.js
 
 // Kraken-Handelspaare in EUR
 const KRAKEN = { BTC: 'XBTEUR', ETH: 'ETHEUR', SOL: 'SOLEUR', XRP: 'XRPEUR', ADA: 'ADAEUR', DOGE: 'XDGEUR', AVAX: 'AVAXEUR', LINK: 'LINKEUR', DOT: 'DOTEUR' };

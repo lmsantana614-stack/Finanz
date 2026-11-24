@@ -1,521 +1,386 @@
-// Haupt-App: Zustand, Analysezyklus, Darstellung.
-const STORE_KEY = 'finanzbot.v1';
-const START_CAPITAL = 50;
-const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK'];
+// Dashboard: zeigt den Stand des Bots, der alle 30 Minuten bei GitHub läuft.
+const REPO_RAW = 'https://raw.githubusercontent.com/lmsantana614-stack/Finanz/main/';
+const REFRESH_MS = 5 * 60e3;
 
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const eur = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v);
-const price = (v) => v == null ? '–' : new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumSignificantDigits: v < 1 ? 4 : 6, minimumFractionDigits: v >= 1 ? 2 : undefined }).format(v);
-const pct = (v, d = 1) => `${v > 0 ? '+' : ''}${v.toFixed(d).replace('.', ',')} %`;
-const time = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const cls = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+const price = (v) => v == null ? '–' : new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumSignificantDigits: v < 1 ? 4 : v < 1000 ? 5 : 7 }).format(v);
+const pct = (v, d = 1) => v == null ? '–' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(d).replace('.', ',')} %`;
+const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${eur(Math.abs(v))}`;
+const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
+const when = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? 'gerade eben' : m < 60 ? `vor ${m} Min.` : m < 1440 ? `vor ${Math.round(m / 60)} Std.` : `vor ${Math.round(m / 1440)} Tagen`; };
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SIDE = { KAUFEN: ['long', 'LONG'], SHORT: ['short', 'SHORT'], VERKAUFEN: ['sell', 'VERKAUFEN'], HALTEN: ['hold', 'HALTEN'] };
 
-function freshState() {
-  return {
-    startCapital: START_CAPITAL,
-    createdAt: Date.now(),
-    pf: Engine.newPortfolio(START_CAPITAL),
-    equityHistory: [{ t: Date.now(), v: START_CAPITAL }],
-    signals: [],
-    lastAction: {},
-    settings: { autoTrade: true, coins: DEFAULT_COINS.slice(), interval: 5, notify: false, sound: false, apiKey: '' },
-  };
-}
+const R = { M: null, S: null, BT: null, charts: {}, group: 'all', metric: 'ch1d', newsKind: 'all' };
+try { const p = JSON.parse(localStorage.getItem('fb.view') || '{}'); Object.assign(R, { group: p.group || 'all', metric: p.metric || 'ch1d', newsKind: p.newsKind || 'all' }); } catch (e) { /* egal */ }
+const saveView = () => { try { localStorage.setItem('fb.view', JSON.stringify({ group: R.group, metric: R.metric, newsKind: R.newsKind })); } catch (e) { /* egal */ } };
 
-function loadState() {
-  try {
-    const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && s.pf) {
-      const f = freshState();
-      s.settings = Object.assign(f.settings, s.settings);
-      s.pf.lastSell = s.pf.lastSell || {};
-      return s;
-    }
-  } catch (e) { /* ignorieren */ }
-  return freshState();
-}
-
-let S = loadState();
-const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* voll/blockiert */ } };
-
-// Laufzeitdaten (nicht gespeichert)
-const R = { market: {}, news: [], newsAnalysis: null, fng: null, demo: false, lastRun: null, running: false, timer: null, selected: null, charts: {} };
-
-// ---------------------------------------------------------------- Analysezyklus
-async function cycle() {
-  if (R.running) return;
-  R.running = true;
-  $('btnRefresh').disabled = true;
-  setStatus('Analysiere Märkte …');
-  const notes = [];
-  try {
-    const syms = [...new Set([...S.settings.coins, ...Object.keys(S.pf.positions)])];
-    const key = S.settings.apiKey;
-
-    const [candleRes, newsRes, fngRes] = await Promise.all([
-      Promise.allSettled(syms.map((s) => Data.candles(s, 250, key))),
-      Data.news(key).then((v) => ({ ok: v }), (e) => ({ err: e })),
-      Data.fearGreed().then((v) => ({ ok: v }), (e) => ({ err: e })),
-    ]);
-
-    const okCount = candleRes.filter((r) => r.status === 'fulfilled').length;
-    R.demo = okCount === 0;
-    R.market = {};
-    syms.forEach((s, i) => {
-      const r = candleRes[i];
-      if (r.status === 'fulfilled') R.market[s] = r.value;
-      else if (R.demo) R.market[s] = Data.demoCandles(s, 250);
-      else notes.push(`${s}: Kurse nicht abrufbar`);
-    });
-    if (R.demo) notes.push('Kursdaten-APIs nicht erreichbar → <b>Demo-Modus</b> mit simulierten Kursen. Es werden keine Trades ausgeführt.');
-
-    R.news = newsRes.ok || [];
-    if (newsRes.err) notes.push('News-Feed nicht erreichbar – Bot entscheidet nur technisch' + (key ? '' : ' (ggf. API-Key in den Einstellungen eintragen)') + '.');
-    R.fng = fngRes.ok || null;
-
-    const now = Date.now();
-    R.newsAnalysis = Strategy.analyzeNews(R.news, Object.keys(R.market), now);
-
-    const prices = {}, evals = {};
-    for (const [sym, m] of Object.entries(R.market)) {
-      const closes = m.rows.map((r) => r.c);
-      prices[sym] = closes[closes.length - 1];
-      const ev = Strategy.evaluate(closes, {
-        news: R.newsAnalysis.perCoin[sym],
-        market: R.newsAnalysis.market,
-        fng: R.fng ? R.fng.value : null,
-      });
-      m.ev = ev;
-      m.price = prices[sym];
-      m.ch24 = closes.length > 24 ? (prices[sym] / closes[closes.length - 25] - 1) * 100 : 0;
-      if (S.settings.coins.includes(sym)) evals[sym] = ev;
-    }
-    // Gehaltene, abgewählte Coins dürfen weiterhin verkauft werden
-    for (const sym of Object.keys(S.pf.positions)) if (R.market[sym]) evals[sym] = R.market[sym].ev;
-
-    // Was würde der Bot tun? (auf einer Kopie berechnen)
-    const simPf = JSON.parse(JSON.stringify(S.pf));
-    R.plan = Engine.decide(simPf, evals, prices, now);
-
-    // Signale protokollieren (nur bei Wechsel der Empfehlung)
-    const newBuys = [];
-    for (const [sym, ev] of Object.entries(evals)) {
-      if (S.lastAction[sym] !== ev.action) {
-        S.signals.unshift({ t: now, sym, action: ev.action, score: ev.score, price: prices[sym], reasons: ev.reasons.slice(0, 4), demo: R.demo });
-        if (ev.action === 'KAUFEN') newBuys.push(sym);
-        S.lastAction[sym] = ev.action;
-      }
-    }
-    S.signals = S.signals.slice(0, 300);
-
-    // Automatisch handeln
-    if (S.settings.autoTrade && !R.demo) {
-      for (const o of Engine.decide(S.pf, evals, prices, now)) {
-        const tr = Engine.execute(S.pf, o, prices[o.sym], now);
-        toast(tr.side === 'BUY'
-          ? `🟢 Gekauft: ${o.sym} für ${eur(tr.eur)}`
-          : `🔴 Verkauft: ${o.sym} für ${eur(tr.eur)} (${tr.pnl >= 0 ? '+' : ''}${eur(tr.pnl)})`, tr.side === 'BUY' ? 'buy' : 'sell');
-      }
-    } else if (!R.demo) {
-      // Auch ohne Auto-Handel Positions-Höchststände für Trailing-Stops nachführen
-      for (const [sym, pos] of Object.entries(S.pf.positions)) if (prices[sym]) pos.peak = Math.max(pos.peak || 0, prices[sym]);
-    }
-
-    if (newBuys.length && !R.demo) alertBuys(newBuys);
-
-    if (!R.demo) {
-      const eq = Engine.equity(S.pf, prices);
-      const last = S.equityHistory[S.equityHistory.length - 1];
-      if (!last || now - last.t > 50e3) S.equityHistory.push({ t: now, v: eq });
-      if (S.equityHistory.length > 3000) S.equityHistory = S.equityHistory.filter((_, i) => i % 2 === 0 || i > 2500);
-    }
-    R.prices = prices;
-    R.lastRun = now;
-    R.source = [...new Set(Object.values(R.market).map((m) => m.source))].join(', ');
-    save();
-  } catch (e) {
-    console.error(e);
-    notes.push('Fehler bei der Analyse: ' + esc(e.message));
-  } finally {
-    R.running = false;
-    $('btnRefresh').disabled = false;
-    banner(notes);
-    render();
-    schedule();
+// ---------------------------------------------------------------- Laden
+async function getData(file) {
+  const bust = `?t=${Math.floor(Date.now() / 60e3)}`;
+  for (const base of ['', REPO_RAW]) {
+    try {
+      const r = await fetch(base + file + bust, { cache: 'no-store' });
+      if (r.ok) return await r.json();
+    } catch (e) { /* nächste Quelle */ }
   }
+  return null;
 }
 
-function schedule() {
-  clearTimeout(R.timer);
-  R.nextRun = Date.now() + S.settings.interval * 60e3;
-  R.timer = setTimeout(cycle, S.settings.interval * 60e3);
-}
-
-// ---------------------------------------------------------------- Benachrichtigungen
-function alertBuys(syms) {
-  const lines = syms.map((s) => {
-    const plan = (R.plan || []).find((o) => o.side === 'BUY' && o.sym === s);
-    return `${s} (${COINS[s].name}) zu ${price(R.market[s].price)}${plan ? ` – ca. ${eur(plan.eur)}` : ''}`;
-  });
-  toast('🔔 Kaufsignal: ' + lines.join(' · '), 'buy', 9000);
-  if (S.settings.notify && 'Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('Trading-Bot: Kaufsignal', { body: lines.join('\n') }); } catch (e) { /* mobil ggf. nicht erlaubt */ }
+async function load() {
+  const [M, S, BT] = await Promise.all([getData('bot/market.json'), getData('bot/state.json'), getData('bot/backtest.json')]);
+  if (!M || !S) {
+    $('error').hidden = false;
+    $('error').innerHTML = 'Die Bot-Daten konnten nicht geladen werden. Prüfe deine Internetverbindung oder öffne den <a href="https://github.com/lmsantana614-stack/Finanz/blob/main/STATUS.md" target="_blank" rel="noopener">Status bei GitHub</a>.';
+    $('updated').textContent = 'Keine Daten';
+    return;
   }
-  if (S.settings.sound) beep();
+  $('error').hidden = true;
+  Object.assign(R, { M, S, BT });
+  render();
 }
-
-function beep() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [660, 880].forEach((f, i) => {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.18);
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.16);
-      o.start(ctx.currentTime + i * 0.18); o.stop(ctx.currentTime + i * 0.18 + 0.17);
-    });
-  } catch (e) { /* kein Audio */ }
-}
-
-function toast(msg, kind = '', ms = 6000) {
-  const el = document.createElement('div');
-  el.className = 'toast ' + kind;
-  el.textContent = msg;
-  $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), ms);
-}
-
-function banner(notes) {
-  const b = $('banner');
-  b.innerHTML = notes.map((n) => `<div>${n}</div>`).join('');
-  b.classList.toggle('hidden', !notes.length);
-}
-
-function setStatus(txt) { $('status').textContent = txt; }
-
-setInterval(() => {
-  if (R.running || !R.lastRun) return;
-  const left = Math.max(0, Math.round((R.nextRun - Date.now()) / 1000));
-  setStatus(`Letzte Analyse ${new Date(R.lastRun).toLocaleTimeString('de-DE')} · nächste in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · Quelle: ${R.source || '–'}${R.demo ? ' (Demo)' : ''}`);
-}, 1000);
 
 // ---------------------------------------------------------------- Darstellung
 function render() {
-  const prices = R.prices || {};
-  const eq = Engine.equity(S.pf, prices);
-  const pnl = eq - S.startCapital;
-  $('kEquity').textContent = eur(eq);
-  $('kStart').textContent = `Start: ${eur(S.startCapital)} am ${new Date(S.createdAt).toLocaleDateString('de-DE')}`;
-  $('kPnl').textContent = (pnl >= 0 ? '+' : '') + eur(pnl);
-  $('kPnl').className = cls(pnl);
-  $('kPnlPct').textContent = pct((pnl / S.startCapital) * 100, 2);
-  $('kCash').textContent = eur(S.pf.cash);
-  $('kPos').textContent = `${Object.keys(S.pf.positions).length} offene Position(en)`;
-  const closed = S.pf.trades.filter((t) => t.side === 'SELL');
-  const wins = closed.filter((t) => t.pnl > 0).length;
-  $('kTrades').textContent = closed.length;
-  $('kWin').textContent = closed.length ? `Trefferquote ${Math.round((wins / closed.length) * 100)} %` : 'noch keine';
-  if (R.fng) {
-    const de = { 'Extreme Fear': 'Extreme Angst', Fear: 'Angst', Neutral: 'Neutral', Greed: 'Gier', 'Extreme Greed': 'Extreme Gier' }[R.fng.label] || R.fng.label;
-    $('kFng').textContent = `${R.fng.value} · ${de}`;
-  } else $('kFng').textContent = '–';
-  if (R.newsAnalysis) {
-    const m = R.newsAnalysis.market;
-    $('kNews').textContent = R.newsAnalysis.count ? `News: ${m > 0.05 ? 'positiv' : m < -0.05 ? 'negativ' : 'neutral'} (${R.newsAnalysis.count} Meldungen)` : 'News: keine Daten';
-  }
-  $('autoTrade').checked = S.settings.autoTrade;
-
-  renderBuyNow();
-  renderMarket();
-  renderPositions(prices);
-  renderTrades();
+  const { M, S } = R;
+  const next = new Date(M.updatedAt + 30 * 60e3);
+  $('updated').textContent = `Aktualisiert ${ago(M.updatedAt)} · nächster Lauf ca. ${next.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
+  renderDepot();
   renderSignals();
+  renderTreemap();
+  renderPositions();
+  renderTrades();
+  renderHistory();
   renderNews();
-  renderEquityChart();
-  if (R.selected) renderCoinDetail(R.selected);
+  renderBacktest();
+  renderHow();
 }
 
-function renderBuyNow() {
-  const el = $('buyNow');
-  const entries = Object.entries(R.market).filter(([s, m]) => m.ev && m.ev.action === 'KAUFEN' && S.settings.coins.includes(s)).sort((a, b) => b[1].ev.score - a[1].ev.score);
-  const sells = (R.plan || []).filter((o) => o.side === 'SELL');
-  if (!R.lastRun) { el.innerHTML = '<p class="muted">Analyse läuft …</p>'; return; }
-  let html = '';
-  if (!entries.length) {
-    html += '<p class="muted big">Aktuell kein Kaufsignal – der Bot wartet auf eine bessere Gelegenheit.</p>';
-  } else {
-    html += '<div class="buycards">';
-    for (const [sym, m] of entries) {
-      const plan = (R.plan || []).find((o) => o.side === 'BUY' && o.sym === sym);
-      let status;
-      if (S.pf.positions[sym]) status = '<span class="tag ok">✔ im Depot</span>';
-      else if (plan && S.settings.autoTrade && !R.demo) status = `<span class="tag ok">wird gekauft: ${eur(plan.eur)}</span>`;
-      else if (plan) status = `<span class="tag buy">Würde kaufen für ${eur(plan.eur)}</span>`;
-      else if (S.pf.lastSell[sym] && Date.now() - S.pf.lastSell[sym] < CONFIG.cooldownH * 3600e3) status = '<span class="tag">Abkühlphase nach Verkauf</span>';
-      else if (Object.keys(S.pf.positions).length >= CONFIG.maxPositions) status = '<span class="tag">Max. Positionen erreicht</span>';
-      else status = '<span class="tag">Kein freies Geld</span>';
-      html += `<div class="buycard" data-sym="${sym}">
-        <div class="bc-head"><b>${sym}</b> <span>${COINS[sym].name}</span><span class="score s-buy">${m.ev.score}</span></div>
-        <div class="bc-price">${price(m.price)} <small class="${cls(m.ch24)}">${pct(m.ch24)}</small></div>
-        ${status}
-        <ul>${m.ev.reasons.slice(0, 4).map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
-      </div>`;
-    }
-    html += '</div>';
-  }
-  if (sells.length) {
-    html += `<p><b>Verkaufen würde er:</b> ${sells.map((o) => `${o.sym} – ${esc(o.reason)}`).join('<br>')}</p>`;
-  }
-  el.innerHTML = html;
-  el.querySelectorAll('.buycard').forEach((c) => c.addEventListener('click', () => selectCoin(c.dataset.sym)));
-}
+function prices() { return Object.fromEntries(Object.entries(R.M.assets).map(([s, a]) => [s, a.price])); }
 
-function renderMarket() {
-  const tb = $('market').querySelector('tbody');
-  const rows = Object.entries(R.market).sort((a, b) => (b[1].ev?.score ?? -999) - (a[1].ev?.score ?? -999));
-  tb.innerHTML = rows.map(([sym, m]) => {
-    const ev = m.ev || { score: 0, action: 'HALTEN', ind: {} };
-    const n = R.newsAnalysis?.perCoin[sym];
-    const ns = n && n.count ? `<span class="${cls(n.score)}">${n.score > 0.05 ? '▲' : n.score < -0.05 ? '▼' : '●'} ${n.count}</span>` : '<span class="muted">–</span>';
-    const w = Math.min(100, Math.abs(ev.score));
-    const act = { KAUFEN: 'buy', VERKAUFEN: 'sell', HALTEN: 'hold' }[ev.action];
-    return `<tr data-sym="${sym}" class="${R.selected === sym ? 'sel' : ''}">
-      <td><b>${sym}</b> <span class="muted">${COINS[sym].name}</span>${S.pf.positions[sym] ? ' <span class="tag ok">Depot</span>' : ''}</td>
-      <td>${price(m.price)}</td>
-      <td class="${cls(m.ch24)}">${pct(m.ch24)}</td>
-      <td>${ev.ind.rsi != null ? ev.ind.rsi.toFixed(0) : '–'}</td>
-      <td>${ns}</td>
-      <td><div class="bar"><span class="${ev.score >= 0 ? 'bp' : 'bn'}" style="width:${w / 2}%;${ev.score >= 0 ? 'left:50%' : `right:50%`}"></span></div><small>${ev.score}</small></td>
-      <td><span class="act ${act}">${ev.action}</span></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="7" class="muted">Noch keine Daten</td></tr>';
-  tb.querySelectorAll('tr[data-sym]').forEach((tr) => tr.addEventListener('click', () => selectCoin(tr.dataset.sym)));
-}
+function renderDepot() {
+  const { M, S } = R;
+  const eq = Engine.equity(S.pf, prices());
+  const pnl = eq - S.startCapital;
+  $('equity').textContent = eur(eq);
+  const p = $('pnl');
+  p.textContent = `${signed(pnl)} · ${pct((pnl / S.startCapital) * 100, 2)}`;
+  p.className = 'pill ' + cls(pnl);
+  $('since').textContent = `seit ${new Date(S.createdAt).toLocaleDateString('de-DE')} mit ${eur(S.startCapital)} Startkapital`;
+  $('cash').textContent = eur(S.pf.cash);
+  $('npos').textContent = `${Object.keys(S.pf.positions).length} / ${M.config.maxPositions}`;
+  const closed = S.pf.trades.filter((t) => t.action === 'CLOSE');
+  const wins = closed.filter((t) => t.pnl > 0).length;
+  $('ntrades').textContent = closed.length;
+  $('winrate').textContent = closed.length ? `${Math.round((wins / closed.length) * 100)} % mit Gewinn` : 'noch keine';
+  const mood = (v) => v == null ? '–' : v <= 25 ? 'Extreme Angst' : v < 45 ? 'Angst' : v <= 55 ? 'Neutral' : v < 75 ? 'Gier' : 'Extreme Gier';
+  const fc = M.fng ? M.fng.value : null;
+  $('fngC').textContent = fc == null ? '–' : `${fc} · ${mood(fc)}`;
+  $('fngCm').style.left = `${fc ?? 50}%`;
+  $('fngS').textContent = M.stockFng == null ? '–' : `${M.stockFng} · ${mood(M.stockFng)}`;
+  $('fngSm').style.left = `${M.stockFng ?? 50}%`;
 
-function selectCoin(sym) {
-  R.selected = R.selected === sym ? null : sym;
-  renderMarket();
-  if (R.selected) { renderCoinDetail(sym); $('coinDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
-  else $('coinDetail').classList.add('hidden');
-}
-
-function renderCoinDetail(sym) {
-  const m = R.market[sym];
-  if (!m) return;
-  $('coinDetail').classList.remove('hidden');
-  $('cdTitle').innerHTML = `${sym} – ${COINS[sym].name}: <span class="act ${{ KAUFEN: 'buy', VERKAUFEN: 'sell', HALTEN: 'hold' }[m.ev.action]}">${m.ev.action}</span> (Score ${m.ev.score})`;
-  $('cdReasons').innerHTML = m.ev.reasons.map((r) => `<li>${esc(r)}</li>`).join('') || '<li>Keine starken Signale</li>';
-  const n = R.newsAnalysis?.perCoin[sym];
-  $('cdNews').innerHTML = n && n.headlines.length
-    ? '<h4>News zu ' + sym + '</h4>' + n.headlines.map(newsItem).join('')
-    : '<p class="muted">Keine aktuellen News zu diesem Coin.</p>';
-
-  const rows = m.rows.slice(-168);
-  const closes = m.rows.map((r) => r.c);
-  const e20 = Ind.ema(closes, 20).slice(-168), e50 = Ind.ema(closes, 50).slice(-168);
-  const labels = rows.map((r) => time(r.t));
-  // Jeden Trade der Kerze zuordnen, in deren Stunde er stattfand
-  const tradePts = (side) => {
-    const pts = rows.map(() => null);
-    for (const tr of S.pf.trades) {
-      if (tr.sym !== sym || tr.side !== side || tr.t < rows[0].t) continue;
-      let idx = rows.length - 1;
-      while (idx > 0 && rows[idx].t > tr.t) idx--;
-      pts[idx] = tr.price;
-    }
-    return pts;
-  };
-  drawChart('coinChart', {
+  const h = S.equityHistory.length ? S.equityHistory : [{ t: S.createdAt, v: S.startCapital }];
+  const pts = h.length === 1 ? [h[0], { t: Date.now(), v: eq }] : h;
+  const up = pts[pts.length - 1].v >= S.startCapital;
+  const color = up ? css('--up') : css('--down');
+  chart('equityChart', {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Kurs', data: rows.map((r) => r.c), borderColor: cssVar('--accent'), borderWidth: 2, pointRadius: 0, tension: 0.1 },
-        { label: 'EMA20', data: e20, borderColor: cssVar('--c2'), borderWidth: 1, pointRadius: 0 },
-        { label: 'EMA50', data: e50, borderColor: cssVar('--c3'), borderWidth: 1, pointRadius: 0 },
-        { label: 'Kauf', data: tradePts('BUY'), showLine: false, pointRadius: 7, pointStyle: 'triangle', backgroundColor: cssVar('--pos'), borderColor: cssVar('--pos') },
-        { label: 'Verkauf', data: tradePts('SELL'), showLine: false, pointRadius: 7, pointStyle: 'triangle', rotation: 180, backgroundColor: cssVar('--neg'), borderColor: cssVar('--neg') },
-      ],
-    },
-    options: chartOpts((v) => price(v)),
+    data: { labels: pts.map((x) => when(x.t)), datasets: [
+      { data: pts.map((x) => x.v), borderColor: color, borderWidth: 2, pointRadius: 0, tension: 0.25, fill: true,
+        backgroundColor: (c) => { const g = c.chart.ctx.createLinearGradient(0, 0, 0, c.chart.height); g.addColorStop(0, color + '40'); g.addColorStop(1, color + '00'); return g; } },
+      { data: pts.map(() => S.startCapital), borderColor: css('--muted'), borderDash: [3, 4], borderWidth: 1, pointRadius: 0 },
+    ] },
+    options: baseOpts(eur, { legend: false, xTicks: false }),
   });
 }
 
-function renderPositions(prices) {
-  const pos = Object.entries(S.pf.positions);
-  if (!pos.length) { $('positions').innerHTML = '<p class="muted">Keine offenen Positionen – alles in Bargeld.</p>'; return; }
-  $('positions').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Einstand</th><th>Aktuell</th><th>Wert</th><th>G/V</th></tr></thead><tbody>${pos.map(([sym, p]) => {
-    const cur = prices[sym] || p.avgPrice;
-    const val = p.qty * cur, g = val - p.invested;
-    return `<tr><td><b>${sym}</b><br><small class="muted">${p.qty.toPrecision(5)} Stk. · seit ${time(p.openedAt)}</small></td>
-      <td>${price(p.avgPrice)}</td><td>${price(cur)}</td><td>${eur(val)}</td>
-      <td class="${cls(g)}">${g >= 0 ? '+' : ''}${eur(g)}<br><small>${pct((g / p.invested) * 100)}</small></td></tr>`;
-  }).join('')}</tbody></table></div>`;
-}
-
-function renderTrades() {
-  const t = S.pf.trades.slice().reverse();
-  $('trades').innerHTML = t.length ? t.map((tr) => `<div class="logrow">
-    <span class="act ${tr.side === 'BUY' ? 'buy' : 'sell'}">${tr.side === 'BUY' ? 'KAUF' : 'VERKAUF'}</span>
-    <b>${tr.sym}</b> ${eur(tr.eur)} @ ${price(tr.price)}
-    ${tr.side === 'SELL' ? `<b class="${cls(tr.pnl)}">${tr.pnl >= 0 ? '+' : ''}${eur(tr.pnl)}</b>` : ''}
-    <small class="muted">${time(tr.t)}</small>
-    <div class="muted small">${esc(tr.reason)}</div></div>`).join('') : '<p class="muted">Noch keine Trades.</p>';
+function scoreBar(score) {
+  const w = Math.min(50, Math.abs(score) / 2);
+  return `<div class="scorebar"><i style="${score >= 0 ? `left:50%;width:${w}%;background:var(--up)` : `right:50%;width:${w}%;background:var(--down)`}"></i></div>`;
 }
 
 function renderSignals() {
-  $('signals').innerHTML = S.signals.length ? S.signals.slice(0, 80).map((s) => `<div class="logrow">
-    <span class="act ${{ KAUFEN: 'buy', VERKAUFEN: 'sell', HALTEN: 'hold' }[s.action]}">${s.action}</span>
-    <b>${s.sym}</b> @ ${price(s.price)} · Score ${s.score}${s.demo ? ' <span class="tag">Demo</span>' : ''}
-    <small class="muted">${time(s.t)}</small>
-    <div class="muted small">${s.reasons.map(esc).join(' · ')}</div></div>`).join('') : '<p class="muted">Noch keine Signale.</p>';
+  const { M, S } = R;
+  const list = Object.entries(M.assets).filter(([, a]) => a.action === 'KAUFEN' || a.action === 'SHORT').sort((a, b) => Math.abs(b[1].score) - Math.abs(a[1].score));
+  $('planNote').textContent = list.length ? `${list.length} Signal${list.length > 1 ? 'e' : ''} · Long ab Score +35, Short ab −40` : '';
+  if (!list.length) { $('signals').innerHTML = '<div class="empty">Gerade kein Signal. Der Bot wartet auf eine bessere Gelegenheit.</div>'; return; }
+  $('signals').innerHTML = list.map(([s, a]) => {
+    const plan = M.plan.find((p) => p.sym === s);
+    const held = S.pf.positions[s];
+    const status = held ? `Im Depot: ${held.side === 'SHORT' ? 'Short' : 'Long'} ${held.lev}x`
+      : !a.tradeable ? 'Börse geschlossen, handelt bei Öffnung'
+      : plan ? `Würde ${eur(plan.margin)} einsetzen (${eur(plan.margin * plan.lev)} Volumen)` : 'Kein freies Geld oder max. Positionen';
+    const [c, t] = SIDE[a.action];
+    return `<button class="sig" data-sym="${esc(s)}">
+      <div class="sig-head"><b>${esc(a.label)}</b><span class="name">${esc(a.name)}</span><span class="side ${c}">${t} ${a.lev}x</span></div>
+      <div class="row gap8"><span class="mono" style="font-size:18px;font-weight:600">${price(a.price)}</span><span class="mono small ${cls(a.ch1d)}">${pct(a.ch1d)}</span><span class="mono small muted" style="margin-left:auto">Score ${a.score}</span></div>
+      ${scoreBar(a.score)}
+      <ul>${a.reasons.slice(0, 3).map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+      <div class="status ${plan && !held ? '' : 'dim'}">${esc(status)}</div>
+    </button>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------- Heatmap (Treemap)
+function squarify(items, x, y, w, h) {
+  const out = [];
+  const total = items.reduce((a, b) => a + b.w, 0);
+  if (!total || w <= 0 || h <= 0) return out;
+  let nodes = items.map((i) => ({ ...i, ar: (i.w / total) * w * h })).sort((a, b) => b.ar - a.ar);
+  const worst = (row, side) => {
+    const s = row.reduce((a, r) => a + r.ar, 0);
+    return Math.max(...row.map((r) => Math.max((side * side * r.ar) / (s * s), (s * s) / (side * side * r.ar))));
+  };
+  const place = (row) => {
+    const s = row.reduce((a, r) => a + r.ar, 0);
+    if (w >= h) {
+      const cw = s / h; let yy = y;
+      for (const r of row) { const hh = r.ar / cw; out.push({ ...r, x, y: yy, w: cw, h: hh }); yy += hh; }
+      x += cw; w -= cw;
+    } else {
+      const rh = s / w; let xx = x;
+      for (const r of row) { const ww = r.ar / rh; out.push({ ...r, x: xx, y, w: ww, h: rh }); xx += ww; }
+      y += rh; h -= rh;
+    }
+  };
+  let row = [];
+  while (nodes.length) {
+    const side = Math.min(w, h), n = nodes[0];
+    if (!row.length || worst([...row, n], side) <= worst(row, side)) { row.push(n); nodes.shift(); }
+    else { place(row); row = []; }
+  }
+  if (row.length) place(row);
+  return out;
+}
+
+function hex2rgb(h) { const m = h.replace('#', ''); return [0, 2, 4].map((i) => parseInt(m.slice(i, i + 2), 16)); }
+function heat(v) {
+  const range = R.metric === 'score' ? 70 : R.metric === 'ch7d' ? 12 : 5;
+  const t = v == null ? 0 : Math.max(-1, Math.min(1, v / range));
+  const mid = hex2rgb(css('--heat-mid')), end = hex2rgb(t >= 0 ? css('--heat-up') : css('--heat-down'));
+  const k = Math.pow(Math.abs(t), 0.75);
+  return `rgb(${mid.map((m, i) => Math.round(m + (end[i] - m) * k)).join(',')})`;
+}
+
+function renderTreemap() {
+  const box = $('treemap');
+  const W = box.clientWidth, H = box.clientHeight;
+  const A = Object.entries(R.M.assets).map(([s, a]) => ({ s, a, w: Math.sqrt(a.cap) }));
+  const groups = R.group === 'all'
+    ? [['crypto', 'Krypto', 0.4], ['stock', 'Aktien', 0.6]]
+    : [[R.group, R.group === 'crypto' ? 'Krypto' : 'Aktien', 1]];
+  const vertical = W < 560;
+  let off = 0, html = '';
+  for (const [type, label, share] of groups) {
+    const items = A.filter((i) => i.a.type === type);
+    if (!items.length) continue;
+    const gx = vertical ? 0 : off * W, gy = vertical ? off * H : 0;
+    const gw = vertical ? W : W * share, gh = vertical ? H * share : H;
+    off += share;
+    if (groups.length > 1) html += `<span class="gl" style="left:${gx}px;top:${gy}px">${label}</span>`;
+    for (const r of squarify(items, gx, gy, gw, gh)) {
+      const a = r.a, v = a[R.metric];
+      const size = Math.min(r.w, r.h);
+      const fs = Math.max(9, Math.min(30, size / 3.6, r.w / (a.label.length * 0.68 + 0.6)));
+      const showVal = r.w > 46 && r.h > 36, showName = r.w > 90 && r.h > 70, showBadge = r.w > 72 && r.h > 52;
+      const pos = R.S.pf.positions[r.s];
+      const valTxt = R.metric === 'score' ? (v > 0 ? '+' : '') + v : pct(v);
+      html += `<button class="tile" data-sym="${esc(r.s)}" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${heat(v)}"
+        aria-label="${esc(a.name)} ${esc(valTxt)}">
+        ${pos && showBadge ? `<span class="badge">${pos.side === 'SHORT' ? '▼' : '▲'} ${pos.lev}x</span>` : ''}
+        ${a.type === 'stock' && !a.tradeable && size > 40 ? '<span class="moon" title="Börse geschlossen">●</span>' : ''}
+        <span class="t-l" style="font-size:${fs}px">${esc(a.label)}</span>
+        ${showVal ? `<span class="t-v" style="font-size:${Math.max(10, fs * 0.55)}px">${esc(valTxt)}</span>` : ''}
+        ${showName ? `<span class="t-n">${esc(a.name)} · ${price(a.price)}</span>` : ''}
+      </button>`;
+    }
+  }
+  box.innerHTML = html;
+  const lg = { ch1d: ['−5 %', '+5 %'], ch7d: ['−12 %', '+12 %'], score: ['Short −70', 'Long +70'] }[R.metric];
+  $('lgLo').textContent = lg[0]; $('lgHi').textContent = lg[1];
+}
+
+// ---------------------------------------------------------------- Depot & Listen
+function renderPositions() {
+  const pos = Object.entries(R.S.pf.positions);
+  if (!pos.length) { $('positions').innerHTML = '<div class="empty">Keine offenen Positionen. Das Geld liegt frei bereit.</div>'; return; }
+  $('positions').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Anlage</th><th>Richtung</th><th>Einsatz</th><th>Einstieg</th><th>Aktuell</th><th>Gewinn/Verlust</th><th>Stop</th><th>Liquidation</th></tr></thead><tbody>${pos.map(([s, p]) => {
+    const a = R.M.assets[s] || {};
+    const cur = a.price ?? p.entry, val = Engine.value(p, cur), g = val - p.invested, lv = Engine.levels(p);
+    return `<tr data-sym="${esc(s)}" style="cursor:pointer"><td><b>${esc(a.label || s)}</b> <span class="muted small">${esc(a.name || '')}</span></td>
+      <td><span class="side ${p.side === 'SHORT' ? 'short' : 'long'}">${p.side} ${p.lev}x</span></td>
+      <td class="num">${eur(p.invested)}</td><td class="num">${price(p.entry)}</td><td class="num">${price(cur)}</td>
+      <td class="num ${cls(g)}">${signed(g)} <span class="small">(${pct((g / p.invested) * 100)})</span></td>
+      <td class="num">${price(lv.stop)}${lv.trail != null ? ' <span class="small muted">mitlaufend</span>' : ''}</td><td class="num muted">${price(lv.liq)}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+
+const label = (s) => (R.M.assets[s] ? R.M.assets[s].label : ASSETS[s] ? ASSETS[s].label : s);
+
+function renderTrades() {
+  const t = R.S.pf.trades.slice().reverse().slice(0, 60);
+  $('trades').innerHTML = t.length ? t.map((x) => {
+    const side = x.side === 'SHORT' ? 'short' : 'long';
+    const head = x.action === 'OPEN'
+      ? `<span class="side ${side}">${x.side} ${x.lev}x</span>`
+      : `<span class="side ${x.pnl >= 0 ? 'long' : 'short'}">ZU</span>`;
+    const body = x.action === 'OPEN'
+      ? `<b>${esc(label(x.sym))}</b> · ${eur(x.eur)} zu <span class="mono">${price(x.price)}</span>`
+      : `<b>${esc(label(x.sym))}</b> ${x.side === 'SHORT' ? 'Short' : 'Long'} ${x.lev}x zu <span class="mono">${price(x.price)}</span> · <b class="mono ${cls(x.pnl)}">${signed(x.pnl)}</b>`;
+    return `<div class="item">${head}<div>${body}</div><span class="when">${when(x.t)}</span><div class="why">${esc(x.reason)}</div></div>`;
+  }).join('') : '<div class="empty">Noch keine Trades.</div>';
+}
+
+function renderHistory() {
+  const h = (R.S.signals || []).slice(0, 80);
+  $('history').innerHTML = h.length ? h.map((x) => {
+    const [c, t] = SIDE[x.action] || SIDE.HALTEN;
+    return `<div class="item"><span class="side ${c}">${t}</span><div><b>${esc(label(x.sym))}</b> <span class="mono">${price(x.price)}</span> · Score ${x.score}${x.action === 'KAUFEN' || x.action === 'SHORT' ? ` · ${x.lev}x` : ''}</div><span class="when">${when(x.t)}</span><div class="why">${esc((x.reasons || []).join(' · '))}</div></div>`;
+  }).join('') : '<div class="empty">Noch keine Signale.</div>';
 }
 
 function newsItem(n) {
-  const s = n.score ?? Strategy.headlineScore(n);
-  return `<a class="news ${s > 0.1 ? 'npos' : s < -0.1 ? 'nneg' : ''}" href="${esc(n.url)}" target="_blank" rel="noopener">
-    <span class="nscore">${s > 0.1 ? '▲' : s < -0.1 ? '▼' : '●'}</span>
-    <span><b>${esc(n.title)}</b><br><small class="muted">${esc(n.source)} · ${time(n.t)}</small></span></a>`;
+  const d = n.score > 0.1 ? ['pos', '▲'] : n.score < -0.1 ? ['neg', '▼'] : ['', '●'];
+  const tag = n.url ? 'a' : 'div';
+  const attrs = n.url ? ` href="${esc(n.url)}" target="_blank" rel="noopener"` : '';
+  return `<${tag} class="news"${attrs}><span class="nd ${d[0]}">${d[1]}</span><span><span class="nt">${esc(n.title)}</span>
+    <span class="nm">${(n.syms || []).slice(0, 4).map((s) => `<span class="chip">${esc(label(s))}</span>`).join('')}<span>${esc(n.source)} · ${when(n.t)}</span></span></span></${tag}>`;
 }
 
 function renderNews() {
-  $('news').innerHTML = R.news.length ? R.news.slice(0, 40).map(newsItem).join('') : '<p class="muted">Keine News geladen.</p>';
+  const list = R.M.news.filter((n) => R.newsKind === 'all' || n.kind === R.newsKind);
+  $('newsList').innerHTML = list.length ? list.slice(0, 50).map(newsItem).join('') : '<div class="empty">Keine News geladen.</div>';
 }
 
-function renderEquityChart() {
-  const h = S.equityHistory;
-  drawChart('equityChart', {
+function renderBacktest() {
+  const b = R.BT;
+  if (!b) { $('btStats').innerHTML = '<div class="empty">Der Backtest wird beim nächsten Lauf berechnet.</div>'; return; }
+  const stat = (l, v, c = '', sub = '') => `<div class="stat"><span>${l}</span><b class="mono ${c}">${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  $('btStats').innerHTML =
+    stat('Aus 50 € wurden', eur(b.end), cls(b.end - 50), pct((b.end / 50 - 1) * 100)) +
+    (b.btcHold ? stat('Nur BTC halten', eur(b.btcHold), cls(b.btcHold - 50), pct((b.btcHold / 50 - 1) * 100)) : '') +
+    stat('Trades', b.trades, '', `${b.trades ? Math.round((b.wins / b.trades) * 100) : 0} % Gewinner · ${b.longs} Long / ${b.shorts} Short`) +
+    stat('Größter Rückgang', pct(-b.maxDD * 100), 'down', `${b.liquidations} Liquidationen · Gebühren ${eur(b.fees)}`);
+  chart('btChart', {
     type: 'line',
-    data: {
-      labels: h.map((p) => time(p.t)),
-      datasets: [
-        { label: 'Depotwert', data: h.map((p) => p.v), borderColor: cssVar('--accent'), backgroundColor: cssVar('--accent-soft'), fill: true, borderWidth: 2, pointRadius: 0, tension: 0.2 },
-        { label: 'Startkapital', data: h.map(() => S.startCapital), borderColor: cssVar('--muted'), borderDash: [4, 4], borderWidth: 1, pointRadius: 0 },
-      ],
-    },
-    options: chartOpts((v) => eur(v)),
+    data: { labels: b.curve.map((p) => when(p[0])), datasets: [
+      { label: 'Bot-Strategie', data: b.curve.map((p) => p[1]), borderColor: css('--accent'), borderWidth: 2, pointRadius: 0, tension: 0.2 },
+      { label: 'Startkapital', data: b.curve.map(() => 50), borderColor: css('--muted'), borderDash: [3, 4], borderWidth: 1, pointRadius: 0 },
+    ] },
+    options: baseOpts(eur, { legend: true }),
   });
 }
 
-// ---------------------------------------------------------------- Charts
-function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function renderHow() {
+  const c = R.M.config;
+  const p = (v) => (v * 100).toFixed(1).replace('.', ',') + ' %';
+  $('howto').innerHTML = `
+    <p>Alle 30 Minuten bewertet der Bot ${Object.keys(R.M.assets).length} Anlagen mit einem Score von etwa −100 bis +100. Er setzt sich aus Trend (EMA20/50), MACD, RSI, Bollinger-Bändern, der Bewegung des letzten Tages, News-Stimmung zur Anlage und zum Markt sowie dem Angst-Gier-Index zusammen (Krypto: Fear &amp; Greed, Aktien: VIX).</p>
+    <ul>
+      <li><b>Long</b> ab Score +${c.buyThreshold}, <b>Short</b> ab ${c.shortThreshold}. Long schließt bei ${c.sellThreshold}, Short bei +${c.coverThreshold}.</li>
+      <li><b>Hebel</b> 1–${c.maxLeverage}x: je stärker das Signal, desto höher. Bei hoher Schwankung (über 4 % pro Tag) höchstens 3x, über 6 % höchstens 2x.</li>
+      <li><b>Stop-Loss</b> ${p(c.stopLoss)} Kursbewegung bei 1x, enger mit Hebel (5x: ${p(c.stopLoss / Math.sqrt(5))}). <b>Gewinnmitnahme</b> bei ${p(c.takeProfit)} (5x: ${p(c.takeProfit / Math.sqrt(5))}), dazu ein mitlaufender Stop.</li>
+      <li>Höchstens ${c.maxPositions} Positionen, je bis ${p(c.maxPosPct)} des Depots als Einsatz. Gebühren: ${p(c.fee)} aufs Volumen, bei Hebel/Short zusätzlich ${p(c.holdFeeHourly * 24)} pro Tag.</li>
+      <li>Aktien handelt er nur zu Börsenzeiten (Xetra 9–17:30 Uhr, USA 15:30–22 Uhr). Warnmeldungen wie Hacks oder Betrug sperren Käufe.</li>
+    </ul>`;
+}
 
-function chartOpts(fmt) {
+// ---------------------------------------------------------------- Detailansicht
+function openDetail(sym) {
+  const a = R.M.assets[sym];
+  if (!a) return;
+  const pos = R.S.pf.positions[sym];
+  const [c, t] = SIDE[a.action];
+  const news = R.M.news.filter((n) => (n.syms || []).includes(sym)).slice(0, 6);
+  $('dBody').innerHTML = `
+    <div class="eyebrow">${a.type === 'crypto' ? 'Kryptowährung' : a.market === 'DE' ? 'Aktie · Xetra' : 'Aktie · USA'}${a.type === 'stock' ? (a.tradeable ? ' · Börse offen' : ' · Börse geschlossen') : ''}</div>
+    <h2 id="dTitle" style="font-size:26px">${esc(a.name)} <span class="muted">${esc(a.label)}</span></h2>
+    <div class="row gap8 wrapflex" style="margin-top:6px"><span class="d-price mono">${price(a.price)}</span><span class="pill ${cls(a.ch1d)}">${pct(a.ch1d)} heute</span></div>
+    <div class="d-chart"><canvas id="dChart"></canvas></div>
+    <div class="row gap8"><span class="side ${c}">${t}${a.action === 'KAUFEN' || a.action === 'SHORT' ? ' ' + a.lev + 'x' : ''}</span><span class="mono">Score ${a.score}</span></div>
+    <div style="margin-top:8px">${scoreBar(a.score)}</div>
+    <div class="d-grid">
+      <div class="stat"><span>7 Tage</span><b class="mono ${cls(a.ch7d)}">${pct(a.ch7d)}</b></div>
+      <div class="stat"><span>RSI</span><b class="mono">${a.rsi != null ? a.rsi.toFixed(0) : '–'}</b></div>
+      <div class="stat"><span>Schwankung</span><b class="mono">${a.vol != null ? a.vol.toFixed(1).replace('.', ',') + ' %' : '–'}</b></div>
+    </div>
+    ${pos ? `<p><b>Im Depot:</b> ${pos.side === 'SHORT' ? 'Short' : 'Long'} ${pos.lev}x seit ${when(pos.openedAt)}, Einstieg ${price(pos.entry)}, Stop ${price(Engine.levels(pos).stop)}.</p>` : ''}
+    <h3 style="font-size:15px">Begründung</h3>
+    <ul class="d-why">${a.reasons.map((r) => `<li>${esc(r)}</li>`).join('') || '<li>Keine starken Signale</li>'}</ul>
+    <h3 style="font-size:15px;margin-top:14px">News</h3>
+    ${news.length ? news.map(newsItem).join('') : '<p class="muted small">Keine aktuellen Meldungen zu dieser Anlage.</p>'}`;
+  $('drawer').hidden = false;
+  const s = a.spark;
+  const color = (s.length && s[s.length - 1][1] >= s[0][1]) ? css('--up') : css('--down');
+  const trades = R.S.pf.trades.filter((x) => x.sym === sym);
+  const mark = (fn) => s.map((p, i) => {
+    const nxt = s[i + 1] ? s[i + 1][0] : Infinity;
+    const tr = trades.find((x) => fn(x) && x.t >= p[0] && x.t < nxt);
+    return tr ? tr.price : null;
+  });
+  chart('dChart', {
+    type: 'line',
+    data: { labels: s.map((p) => when(p[0])), datasets: [
+      { label: 'Kurs', data: s.map((p) => p[1]), borderColor: color, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+      { label: 'Einstieg', data: mark((x) => x.action === 'OPEN'), showLine: false, pointRadius: 6, pointStyle: 'triangle', backgroundColor: css('--accent') },
+      { label: 'Ausstieg', data: mark((x) => x.action === 'CLOSE'), showLine: false, pointRadius: 6, pointStyle: 'rectRot', backgroundColor: css('--fg') },
+    ] },
+    options: baseOpts(price, { legend: false }),
+  });
+  $('drawer').querySelector('.x').focus();
+}
+function closeDetail() { $('drawer').hidden = true; }
+
+// ---------------------------------------------------------------- Charts
+function baseOpts(fmt, o = {}) {
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { labels: { color: cssVar('--muted'), boxWidth: 12 } },
-      tooltip: { callbacks: { label: (c) => c.raw == null ? null : `${c.dataset.label}: ${fmt(c.raw)}` } },
+      legend: { display: !!o.legend, labels: { color: css('--muted'), boxWidth: 10, usePointStyle: true } },
+      tooltip: { callbacks: { label: (c) => (c.raw == null ? null : `${c.dataset.label || 'Wert'}: ${fmt(c.raw)}`) } },
     },
     scales: {
-      x: { ticks: { color: cssVar('--muted'), maxTicksLimit: 6, maxRotation: 0 }, grid: { display: false } },
-      y: { ticks: { color: cssVar('--muted'), callback: fmt }, grid: { color: cssVar('--grid') } },
+      x: { display: o.xTicks !== false, ticks: { color: css('--muted'), maxTicksLimit: 5, maxRotation: 0, font: { size: 11 } }, grid: { display: false } },
+      y: { position: 'right', ticks: { color: css('--muted'), callback: fmt, maxTicksLimit: 5, font: { size: 11 } }, grid: { color: css('--line') }, border: { display: false } },
     },
   };
 }
-
-function drawChart(id, cfg) {
+function chart(id, cfg) {
   if (typeof Chart === 'undefined') return;
   if (R.charts[id]) R.charts[id].destroy();
   R.charts[id] = new Chart($(id), cfg);
 }
 
-// ---------------------------------------------------------------- Backtest
-async function runBacktest() {
-  const btn = $('btnBacktest');
-  btn.disabled = true; btn.textContent = 'Lade historische Daten …';
-  const syms = S.settings.coins;
-  let demo = false;
-  const series = {};
-  const res = await Promise.allSettled(syms.map((s) => Data.candles(s, 2000, S.settings.apiKey)));
-  res.forEach((r, i) => { if (r.status === 'fulfilled' && r.value.rows.length > 200) series[syms[i]] = r.value.rows; });
-  if (!Object.keys(series).length) { demo = true; syms.forEach((s) => (series[s] = Data.demoCandles(s, 2000).rows)); }
-  btn.textContent = 'Rechne …';
-  await new Promise((r) => setTimeout(r, 20));
-  const { pf, curve, hold } = Engine.backtest(series, START_CAPITAL);
-  const end = curve[curve.length - 1].v;
-  const sells = pf.trades.filter((t) => t.side === 'SELL');
-  const wins = sells.filter((t) => t.pnl > 0).length;
-  let peak = -Infinity, mdd = 0;
-  curve.forEach((p) => { peak = Math.max(peak, p.v); mdd = Math.max(mdd, (peak - p.v) / peak); });
-  const holdEnd = hold[hold.length - 1].v;
-  const days = Math.round((curve[curve.length - 1].t - curve[0].t) / 864e5);
-  $('btResult').innerHTML = `
-    ${demo ? '<p class="warn">Keine echten Kursdaten erreichbar – Backtest mit simulierten Demo-Kursen.</p>' : ''}
-    <div class="kpis small">
-      <div class="kpi"><label>Endwert nach ${days} Tagen</label><b class="${cls(end - START_CAPITAL)}">${eur(end)}</b><small>${pct((end / START_CAPITAL - 1) * 100)}</small></div>
-      <div class="kpi"><label>Vergleich: nur BTC halten</label><b>${eur(holdEnd)}</b><small>${pct((holdEnd / START_CAPITAL - 1) * 100)}</small></div>
-      <div class="kpi"><label>Trades</label><b>${sells.length}</b><small>Trefferquote ${sells.length ? Math.round((wins / sells.length) * 100) : 0} %</small></div>
-      <div class="kpi"><label>Max. Rückgang</label><b class="neg">${pct(-mdd * 100)}</b><small>Gebühren: ${eur(pf.trades.reduce((a, t) => a + t.fee, 0))}</small></div>
-    </div>`;
-  const step = Math.max(1, Math.floor(curve.length / 400));
-  const c = curve.filter((_, i) => i % step === 0), hh = hold.filter((_, i) => i % step === 0);
-  drawChart('btChart', {
-    type: 'line',
-    data: {
-      labels: c.map((p) => time(p.t)),
-      datasets: [
-        { label: 'Bot-Strategie', data: c.map((p) => p.v), borderColor: cssVar('--accent'), borderWidth: 2, pointRadius: 0 },
-        { label: 'BTC halten', data: hh.map((p) => p.v), borderColor: cssVar('--c3'), borderWidth: 1, pointRadius: 0 },
-      ],
-    },
-    options: chartOpts((v) => eur(v)),
-  });
-  btn.disabled = false; btn.textContent = 'Backtest erneut starten';
-}
-
-// ---------------------------------------------------------------- Einstellungen
-function openSettings() {
-  $('coinPicker').innerHTML = Object.entries(COINS).map(([s, c]) =>
-    `<label class="chip"><input type="checkbox" value="${s}" ${S.settings.coins.includes(s) ? 'checked' : ''}> ${s} <small>${c.name}</small></label>`).join('');
-  $('interval').value = String(S.settings.interval);
-  $('notify').checked = S.settings.notify;
-  $('sound').checked = S.settings.sound;
-  $('apiKey').value = S.settings.apiKey;
-  $('settings').showModal();
-}
-
-function wire() {
-  $('btnRefresh').addEventListener('click', cycle);
-  $('btnSettings').addEventListener('click', openSettings);
-  $('btnBacktest').addEventListener('click', () => runBacktest().catch((e) => { $('btResult').innerHTML = `<p class="warn">Backtest fehlgeschlagen: ${esc(e.message)}</p>`; $('btnBacktest').disabled = false; }));
-  $('autoTrade').addEventListener('change', (e) => { S.settings.autoTrade = e.target.checked; save(); if (e.target.checked) cycle(); });
-  $('notify').addEventListener('change', async (e) => {
-    if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') {
-      const p = await Notification.requestPermission();
-      if (p !== 'granted') { e.target.checked = false; toast('Benachrichtigungen wurden vom Browser blockiert.'); }
-    }
-  });
-  $('settings').addEventListener('close', () => {
-    const coins = [...$('coinPicker').querySelectorAll('input:checked')].map((i) => i.value);
-    S.settings.coins = coins.length ? coins : DEFAULT_COINS.slice();
-    S.settings.interval = Number($('interval').value);
-    S.settings.notify = $('notify').checked;
-    S.settings.sound = $('sound').checked;
-    S.settings.apiKey = $('apiKey').value.trim();
-    save();
-    cycle();
-  });
-  $('btnReset').addEventListener('click', () => {
-    if (!confirm('Depot, Trades und Signale löschen und mit 50 € neu starten?')) return;
-    const settings = S.settings;
-    S = freshState(); S.settings = settings; save();
-    $('settings').close();
-  });
-  $('btnExport').addEventListener('click', () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }));
-    a.download = `tradingbot-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-  });
-  document.addEventListener('visibilitychange', () => {
-    // Nach Rückkehr in den Tab sofort aktualisieren, falls überfällig
-    if (!document.hidden && R.nextRun && Date.now() > R.nextRun) cycle();
+// ---------------------------------------------------------------- Bedienung
+function seg(id, key, after) {
+  const el = $(id);
+  el.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.v === R[key]);
+    b.addEventListener('click', () => {
+      R[key] = b.dataset.v; saveView();
+      el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      if (R.M) after();
+    });
   });
 }
+seg('hmGroup', 'group', renderTreemap);
+seg('hmMetric', 'metric', renderTreemap);
+seg('newsFilter', 'newsKind', renderNews);
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]')) return closeDetail();
+  const t = e.target.closest('[data-sym]');
+  if (t && !e.target.closest('a')) openDetail(t.dataset.sym);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
+let rz;
+window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => R.M && renderTreemap(), 150); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => R.M && render());
 
-wire();
-render();
-cycle();
+load();
+setInterval(load, REFRESH_MS);

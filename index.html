@@ -2,128 +2,136 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Finanz Trading-Bot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f17">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Finanz Bot">
+  <title>Finanz Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap">
   <link rel="stylesheet" href="css/style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <span class="logo">₿</span>
-      <div>
-        <h1>Finanz Trading-Bot</h1>
-        <div class="sub" id="status">Starte …</div>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M3 17l5-6 4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <div>
+          <h1>Finanz Bot</h1>
+          <div class="sub" id="updated">Lade Daten …</div>
+        </div>
       </div>
-    </div>
-    <div class="actions">
-      <button id="btnRefresh">↻ Jetzt analysieren</button>
-      <button id="btnSettings" class="ghost">⚙ Einstellungen</button>
+      <nav class="tabs" aria-label="Bereiche">
+        <a href="#heatmap">Heatmap</a><a href="#depot">Depot</a><a href="#news">News</a><a href="#backtest">Backtest</a>
+      </nav>
     </div>
   </header>
 
-  <div id="banner" class="banner hidden"></div>
+  <main class="wrap">
+    <div id="error" class="notice" hidden></div>
 
-  <main>
-    <section class="kpis">
-      <div class="kpi"><label>Depotwert</label><b id="kEquity">–</b><small id="kStart">Start: 50,00 €</small></div>
-      <div class="kpi"><label>Gewinn / Verlust</label><b id="kPnl">–</b><small id="kPnlPct">–</small></div>
-      <div class="kpi"><label>Bargeld</label><b id="kCash">–</b><small id="kPos">–</small></div>
-      <div class="kpi"><label>Abgeschl. Trades</label><b id="kTrades">–</b><small id="kWin">–</small></div>
-      <div class="kpi"><label>Marktstimmung</label><b id="kFng">–</b><small id="kNews">–</small></div>
+    <section class="hero" id="depot">
+      <div class="hero-main">
+        <div class="eyebrow">Depotwert · Papier-Trading</div>
+        <div class="big mono" id="equity">–</div>
+        <div class="row gap8 wrapflex">
+          <span class="pill" id="pnl">–</span>
+          <span class="muted small" id="since">–</span>
+        </div>
+        <div class="equity-chart"><canvas id="equityChart" aria-label="Depotverlauf"></canvas></div>
+      </div>
+      <div class="hero-side">
+        <div class="stat"><span>Frei verfügbar</span><b class="mono" id="cash">–</b></div>
+        <div class="stat"><span>Offene Positionen</span><b class="mono" id="npos">–</b></div>
+        <div class="stat"><span>Abgeschl. Trades</span><b class="mono" id="ntrades">–</b><small id="winrate"></small></div>
+        <div class="mood">
+          <div class="mood-head"><span>Krypto-Stimmung</span><b id="fngC">–</b></div>
+          <div class="track"><i id="fngCm"></i></div>
+        </div>
+        <div class="mood">
+          <div class="mood-head"><span>Aktien-Stimmung (VIX)</span><b id="fngS">–</b></div>
+          <div class="track"><i id="fngSm"></i></div>
+        </div>
+      </div>
     </section>
 
-    <section class="card highlight">
-      <h2>🔔 Was der Bot jetzt kaufen würde</h2>
-      <div id="buyNow"></div>
-      <label class="switch"><input type="checkbox" id="autoTrade"> <span>Automatisch (Papier-)Handeln – der Bot führt seine Signale selbst mit dem virtuellen Guthaben aus</span></label>
+    <section class="block">
+      <div class="block-head">
+        <h2>Was der Bot jetzt tun würde</h2>
+        <span class="muted small" id="planNote"></span>
+      </div>
+      <div id="signals" class="sigrow"></div>
+    </section>
+
+    <section class="block" id="heatmap">
+      <div class="block-head">
+        <h2>Heatmap</h2>
+        <div class="seg" role="tablist" id="hmGroup">
+          <button data-v="all" class="on">Alle</button><button data-v="crypto">Krypto</button><button data-v="stock">Aktien</button>
+        </div>
+        <div class="seg" role="tablist" id="hmMetric">
+          <button data-v="ch1d" class="on">1 Tag</button><button data-v="ch7d">7 Tage</button><button data-v="score">Bot-Score</button>
+        </div>
+      </div>
+      <div id="treemap" class="treemap" aria-label="Heatmap aller Anlagen"></div>
+      <div class="legend"><span id="lgLo">−5 %</span><i></i><span id="lgHi">+5 %</span><span class="muted small">Kachelgröße ≈ Börsenwert · Tippen für Details</span></div>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Offene Positionen</h2></div>
+      <div id="positions"></div>
     </section>
 
     <section class="grid2">
-      <div class="card">
-        <h2>Depotentwicklung</h2>
-        <div class="chartbox"><canvas id="equityChart"></canvas></div>
+      <div class="block">
+        <div class="block-head"><h2>Trades</h2></div>
+        <div id="trades" class="list scroll"></div>
       </div>
-      <div class="card">
-        <h2>Offene Positionen</h2>
-        <div id="positions"></div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Marktübersicht &amp; Signale</h2>
-      <p class="hint">Score = Kombination aus Trend, MACD, RSI, Bollinger, 24h-Momentum, News-Stimmung und Fear &amp; Greed. Ab <b>+35</b> → Kaufen, ab <b>−20</b> → Verkaufen. Klick auf eine Zeile zeigt Begründung &amp; Chart.</p>
-      <div class="tablewrap"><table id="market"><thead><tr>
-        <th>Coin</th><th>Kurs</th><th>24h</th><th>RSI</th><th>News</th><th>Score</th><th>Empfehlung</th>
-      </tr></thead><tbody></tbody></table></div>
-      <div id="coinDetail" class="hidden">
-        <h3 id="cdTitle"></h3>
-        <ul id="cdReasons"></ul>
-        <div class="chartbox tall"><canvas id="coinChart"></canvas></div>
-        <div id="cdNews"></div>
+      <div class="block">
+        <div class="block-head"><h2>Signal-Verlauf</h2></div>
+        <div id="history" class="list scroll"></div>
       </div>
     </section>
 
-    <section class="grid2">
-      <div class="card">
-        <h2>Trade-Protokoll</h2>
-        <div id="trades" class="scroll"></div>
+    <section class="block" id="news">
+      <div class="block-head">
+        <h2>News &amp; Stimmung</h2>
+        <div class="seg" id="newsFilter"><button data-v="all" class="on">Alle</button><button data-v="crypto">Krypto</button><button data-v="stock">Aktien</button></div>
       </div>
-      <div class="card">
-        <h2>Signal-Verlauf</h2>
-        <div id="signals" class="scroll"></div>
-      </div>
+      <div id="newsList" class="list scroll tall"></div>
     </section>
 
-    <section class="card">
-      <h2>📰 Aktuelle Krypto-News (mit Stimmungsbewertung)</h2>
-      <div id="news" class="scroll"></div>
+    <section class="block" id="backtest">
+      <div class="block-head"><h2>Backtest: letzte 30 Tage</h2><span class="muted small">gleiche Regeln, ohne News · täglich neu berechnet</span></div>
+      <div id="btStats" class="btstats"></div>
+      <div class="chartbox"><canvas id="btChart" aria-label="Backtest-Verlauf"></canvas></div>
     </section>
 
-    <section class="card">
-      <h2>🧪 Backtest – was wäre aus 50 € geworden?</h2>
-      <p class="hint">Testet dieselbe Strategie auf den letzten ~83 Tagen Stundenkursen (ohne News, die gibt es rückwirkend nicht). Vergangene Ergebnisse sind keine Garantie für die Zukunft.</p>
-      <button id="btnBacktest">Backtest starten</button>
-      <div id="btResult"></div>
-      <div class="chartbox"><canvas id="btChart"></canvas></div>
+    <section class="block">
+      <details class="how">
+        <summary>So entscheidet der Bot</summary>
+        <div id="howto"></div>
+      </details>
     </section>
   </main>
 
-  <dialog id="settings">
-    <form method="dialog">
-      <h2>Einstellungen</h2>
-      <label>Coins, die der Bot beobachtet</label>
-      <div id="coinPicker" class="coinpicker"></div>
-      <label>Analyse-Intervall
-        <select id="interval">
-          <option value="1">jede Minute</option>
-          <option value="5">alle 5 Minuten</option>
-          <option value="15">alle 15 Minuten</option>
-          <option value="60">jede Stunde</option>
-        </select>
-      </label>
-      <label class="switch"><input type="checkbox" id="notify"> <span>Browser-Benachrichtigung bei Kaufsignal</span></label>
-      <label class="switch"><input type="checkbox" id="sound"> <span>Ton bei Kaufsignal</span></label>
-      <label>CryptoCompare API-Key (optional, für höhere Limits)
-        <input type="text" id="apiKey" placeholder="leer lassen = ohne Key" autocomplete="off">
-      </label>
-      <hr>
-      <button type="button" id="btnReset" class="danger">Depot zurücksetzen (wieder 50 €)</button>
-      <button type="button" id="btnExport" class="ghost">Daten exportieren (JSON)</button>
-      <div class="dlgactions"><button value="ok">Speichern</button></div>
-    </form>
-  </dialog>
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-bg" data-close></div>
+    <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+      <button class="x" data-close aria-label="Schließen">×</button>
+      <div id="dBody"></div>
+    </aside>
+  </div>
 
-  <div id="toasts"></div>
-
-  <footer>
-    <b>Hinweis:</b> Dies ist ein <b>Papier-Trading-Bot</b> – es wird kein echtes Geld bewegt. Die Signale sind automatisch berechnet und
-    <b>keine Anlageberatung</b>. Kryptowährungen sind hochriskant; ein Totalverlust ist möglich.
-    Der Bot rechnet nur, solange diese Seite geöffnet ist. Daten: CryptoCompare, CoinGecko, alternative.me.
+  <footer class="wrap foot">
+    Papier-Trading mit virtuellem Geld. Hebel vervielfacht Gewinne <b>und</b> Verluste. Automatisch berechnete Signale, keine Anlageberatung.
+    Der Bot läuft alle 30 Minuten bei GitHub; diese Seite zeigt seinen Stand. Daten: CryptoCompare/Kraken, Yahoo Finance, alternative.me.
   </footer>
 
+  <script src="js/assets.js"></script>
   <script src="js/indicators.js"></script>
-  <script src="js/data.js"></script>
   <script src="js/strategy.js"></script>
   <script src="js/app.js"></script>
 </body>
