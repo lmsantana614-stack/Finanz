@@ -21,7 +21,7 @@ Alle Daten werden im Browser gespeichert (localStorage). Der Bot rechnet nur, **
 
 - **Sofort**: `tradingbot.html` herunterladen und doppelklicken. Das ist eine einzelne Datei mit allem drin, sie braucht keinen Server und keine Installation (nur Internet für die Kurse).
 - **Lokal aus dem Repo**: `index.html` im Browser öffnen. Nach Änderungen an den Quelldateien mit `python3 build.py` die Einzeldatei neu bauen.
-- **Online über GitHub Pages**: Im Repo unter *Settings → Pages → Source* „GitHub Actions“ wählen. Jeder Push auf `main` veröffentlicht die Seite dann automatisch.
+- **Online über GitHub Pages**: Im Repo unter *Settings → Pages* bei *Source* „Deploy from a branch“, Branch `main` und Ordner `/ (root)` wählen. Die Seite liegt dann unter `https://lmsantana614-stack.github.io/Finanz/` und aktualisiert sich bei jedem Push auf `main`.
 
 ## Datenquellen (kostenlos)
 
