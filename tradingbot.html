@@ -1018,13 +1018,13 @@ function renderCoinDetail(sym) {
 function renderPositions(prices) {
   const pos = Object.entries(S.pf.positions);
   if (!pos.length) { $('positions').innerHTML = '<p class="muted">Keine offenen Positionen – alles in Bargeld.</p>'; return; }
-  $('positions').innerHTML = `<table><thead><tr><th>Coin</th><th>Einstand</th><th>Aktuell</th><th>Wert</th><th>G/V</th></tr></thead><tbody>${pos.map(([sym, p]) => {
+  $('positions').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Einstand</th><th>Aktuell</th><th>Wert</th><th>G/V</th></tr></thead><tbody>${pos.map(([sym, p]) => {
     const cur = prices[sym] || p.avgPrice;
     const val = p.qty * cur, g = val - p.invested;
     return `<tr><td><b>${sym}</b><br><small class="muted">${p.qty.toPrecision(5)} Stk. · seit ${time(p.openedAt)}</small></td>
       <td>${price(p.avgPrice)}</td><td>${price(cur)}</td><td>${eur(val)}</td>
       <td class="${cls(g)}">${g >= 0 ? '+' : ''}${eur(g)}<br><small>${pct((g / p.invested) * 100)}</small></td></tr>`;
-  }).join('')}</tbody></table>`;
+  }).join('')}</tbody></table></div>`;
 }
 
 function renderTrades() {
