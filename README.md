@@ -1,13 +1,13 @@
 # Finanz Trading-Bot
 
-**🌐 [Webseite öffnen](https://raw.githack.com/lmsantana614-stack/Finanz/main/index.html)** · **📊 [Status](STATUS.md)** · **🔔 [Meldungen](../../issues/1)**
+**🌐 [Webseite öffnen](https://raw.githack.com/lmsantana614-stack/Finanz/main/index.html)** · **📊 [Status](../../blob/data/STATUS.md)** · **🔔 [Meldungen](../../issues/1)**
 
-Ein **Papier-Trading-Bot**, der mit **50 € virtuellem Guthaben** Kryptowährungen und Aktien handelt, long und short mit Hebel. Er läuft alle 30 Minuten bei GitHub und meldet sich per Push-Nachricht, wenn er etwas kauft oder kaufen würde.
+Ein **Papier-Trading-Bot**, der mit **50 € virtuellem Guthaben** Kryptowährungen und Aktien handelt, long und short mit Hebel. Er läuft alle 5 Minuten bei GitHub (die Webseite aktualisiert Krypto-Kurse sogar alle 5 Sekunden) und meldet sich per Push-Nachricht, wenn er etwas kauft oder kaufen würde.
 
 ## Funktionen
 
 - **Webseite (Dashboard):** https://raw.githack.com/lmsantana614-stack/Finanz/main/index.html zeigt Depot, Signale, eine Heatmap (Treemap) aller Anlagen, Positionen mit Stop und Liquidationspreis, Trades, News und den Backtest. Sie liest die Daten, die der Bot schreibt, und lädt sie alle 5 Minuten neu.
-- **Bot (GitHub Actions, alle 30 Minuten):** `bot/run.js` bewertet 8 Kryptowährungen und 15 Aktien (USA und Deutschland), handelt Long und Short mit 1–5x Hebel und virtuellen 50 €. Jeder Trade und jedes neue Signal kommt als Kommentar in Issue #1, mit Erwähnung, also als Push-Nachricht in der GitHub-App.
+- **Bot (GitHub Actions, alle 5 Minuten):** `bot/run.js` bewertet 8 Kryptowährungen und 15 Aktien (USA und Deutschland), handelt Long und Short mit 1–5x Hebel und virtuellen 50 €. Jeder Trade und jedes neue Signal kommt als Kommentar in Issue #1, mit Erwähnung, also als Push-Nachricht in der GitHub-App.
 - **Strategie (`js/strategy.js`):** Score aus Trend, MACD, RSI, Bollinger, Tagesbewegung, News-Stimmung und Angst/Gier (Krypto: Fear & Greed, Aktien: VIX). Hebel steigt mit der Signalstärke und sinkt bei hoher Schwankung. Stop-Loss, Gewinnmitnahme und Trailing-Stop werden mit dem Hebel enger. Liquidation, Handels- und Haltegebühren sind eingerechnet. Aktien werden nur zu Börsenzeiten gehandelt.
 - **Backtest:** täglich über die letzten 30 Tage mit denselben Regeln (ohne News, nur Krypto, weil es für Aktien keine frei abrufbaren Stundenkurse gibt).
 
@@ -23,6 +23,6 @@ Ein **Papier-Trading-Bot**, der mit **50 € virtuellem Guthaben** Kryptowährun
 | `js/indicators.js` | technische Indikatoren |
 | `js/data.js` | Krypto-Datenquellen (CryptoCompare, Kraken, CoinGecko, Fear & Greed) |
 | `bot/run.js` | Bot inkl. Aktien über TradingView (Kurse, Indikatoren, VIX), EUR/USD von der EZB, News per RSS |
-| `bot/state.json`, `bot/market.json`, `bot/backtest.json`, `bot/history.json`, `STATUS.md` | vom Bot geschrieben |
+| Zweig `data`: `bot/*.json`, `STATUS.md` | vom Bot geschrieben (immer nur der neueste Stand, damit das Repo klein bleibt) |
 
-Manuell starten: *Actions → Trading-Bot → Run workflow*. Neustart mit 50 €: `bot/state.json` löschen.
+Manuell starten: *Actions → Trading-Bot → Run workflow*. Neustart mit 50 €: im Zweig `data` die Datei `bot/state.json` löschen.

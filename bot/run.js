@@ -6,12 +6,12 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
-const F = { state: path.join(__dirname, 'state.json'), market: path.join(__dirname, 'market.json'), bt: path.join(__dirname, 'backtest.json'), hist: path.join(__dirname, 'history.json'), status: path.join(ROOT, 'STATUS.md') };
+const F = { state: path.join(__dirname, 'state.json'), market: path.join(__dirname, 'market.json'), bt: path.join(__dirname, 'backtest.json'), hist: path.join(__dirname, 'history.json'), news: path.join(__dirname, 'newscache.json'), status: path.join(ROOT, 'STATUS.md') };
 const START_CAPITAL = 50;
 const DRY = process.argv.includes('--dry');
 const REPO = process.env.GITHUB_REPOSITORY || 'OWNER/REPO';
 const [OWNER, NAME] = REPO.split('/');
-const STATUS_URL = `https://github.com/${REPO}/blob/main/STATUS.md`;
+const STATUS_URL = `https://github.com/${REPO}/blob/data/STATUS.md`;
 const SITE_URL = `https://raw.githack.com/${REPO}/main/index.html`;
 const UA = { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36' };
 
@@ -70,6 +70,15 @@ async function rss(url, kind, tag, source) {
     out.push({ t: Date.parse(get('pubDate')) || Date.now(), title: get('title'), body: get('description').slice(0, 400), url: get('link'), source, tags: tag || '', kind });
   }
   return out;
+}
+
+// News nur alle 15 Minuten neu laden (der Bot läuft alle 5 Minuten)
+async function loadNewsCached(problems, now) {
+  const c = loadJSON(F.news, null);
+  if (c && now - c.at < 15 * 60e3 && c.items && c.items.length) return c.items;
+  const items = await loadNews(problems);
+  if (items.length) fs.writeFileSync(F.news, JSON.stringify({ at: now, items: items.slice(0, 300) }));
+  return items.length ? items : (c && c.items) || [];
 }
 
 async function loadNews(problems) {
@@ -175,7 +184,7 @@ function loadJSON(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf
   try { fng = await Data.fearGreed(); } catch (e) { problems.push('Krypto Fear & Greed nicht abrufbar.'); }
   try { const v = await tradingView('cfd', ['TVC:VIX'], ['close']); vix = v['TVC:VIX'].close; } catch (e) { problems.push('VIX nicht abrufbar.'); }
   const stockFng = vix != null ? Math.round(Math.max(0, Math.min(100, 100 - (vix - 10) * 4))) : null;
-  const news = await loadNews(problems);
+  const news = await loadNewsCached(problems, now);
   const analysis = Strategy.analyzeNews(news, Object.keys(market), now);
 
   // ---- Bewerten

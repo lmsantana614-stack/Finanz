@@ -1,6 +1,7 @@
-// Dashboard: zeigt den Stand des Bots, der alle 30 Minuten bei GitHub läuft.
-const REPO_RAW = 'https://raw.githubusercontent.com/lmsantana614-stack/Finanz/main/';
-const REFRESH_MS = 5 * 60e3;
+// Dashboard: zeigt den Stand des Bots (läuft alle 5 Minuten bei GitHub) und aktualisiert Krypto-Kurse live alle 5 Sekunden.
+const REPO_RAW = 'https://raw.githubusercontent.com/lmsantana614-stack/Finanz/data/';
+const REFRESH_MS = 60e3;
+const LIVE_MS = 5e3;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -21,7 +22,7 @@ const saveView = () => { try { localStorage.setItem('fb.view', JSON.stringify({ 
 // ---------------------------------------------------------------- Laden
 async function getData(file) {
   const bust = `?t=${Math.floor(Date.now() / 60e3)}`;
-  for (const base of ['', REPO_RAW]) {
+  for (const base of [REPO_RAW, '']) {
     try {
       const r = await fetch(base + file + bust, { cache: 'no-store' });
       if (r.ok) return await r.json();
@@ -40,14 +41,20 @@ async function load() {
   }
   $('error').hidden = true;
   Object.assign(R, { M, S, BT });
+  applyLive();
   render();
 }
 
 // ---------------------------------------------------------------- Darstellung
+function renderUpdated() {
+  const M = R.M;
+  const next = new Date(M.updatedAt + 5 * 60e3);
+  $('updated').textContent = `Bot-Lauf ${ago(M.updatedAt)} · nächster ca. ${next.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${R.liveAt ? ' · Krypto live' : ''}`;
+}
+
 function render() {
   const { M, S } = R;
-  const next = new Date(M.updatedAt + 30 * 60e3);
-  $('updated').textContent = `Aktualisiert ${ago(M.updatedAt)} · nächster Lauf ca. ${next.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
+  renderUpdated();
   renderDepot();
   renderSignals();
   renderTreemap();
@@ -61,7 +68,7 @@ function render() {
 
 function prices() { return Object.fromEntries(Object.entries(R.M.assets).map(([s, a]) => [s, a.price])); }
 
-function renderDepot() {
+function renderDepot(skipChart) {
   const { M, S } = R;
   const eq = Engine.equity(S.pf, prices());
   const pnl = eq - S.startCapital;
@@ -83,6 +90,7 @@ function renderDepot() {
   $('fngS').textContent = M.stockFng == null ? '–' : `${M.stockFng} · ${mood(M.stockFng)}`;
   $('fngSm').style.left = `${M.stockFng ?? 50}%`;
 
+  if (skipChart) return;
   const h = S.equityHistory.length ? S.equityHistory : [{ t: S.createdAt, v: S.startCapital }];
   const pts = h.length === 1 ? [h[0], { t: Date.now(), v: eq }] : h;
   const up = pts[pts.length - 1].v >= S.startCapital;
@@ -279,7 +287,7 @@ function renderHow() {
   const c = R.M.config;
   const p = (v) => (v * 100).toFixed(1).replace('.', ',') + ' %';
   $('howto').innerHTML = `
-    <p>Alle 30 Minuten bewertet der Bot ${Object.keys(R.M.assets).length} Anlagen mit einem Score von etwa −100 bis +100. Er setzt sich aus Trend (EMA20/50), MACD, RSI, Bollinger-Bändern, der Bewegung des letzten Tages, News-Stimmung zur Anlage und zum Markt sowie dem Angst-Gier-Index zusammen (Krypto: Fear &amp; Greed, Aktien: VIX).</p>
+    <p>Alle 5 Minuten bewertet der Bot ${Object.keys(R.M.assets).length} Anlagen mit einem Score von etwa −100 bis +100. Er setzt sich aus Trend (EMA20/50), MACD, RSI, Bollinger-Bändern, der Bewegung des letzten Tages, News-Stimmung zur Anlage und zum Markt sowie dem Angst-Gier-Index zusammen (Krypto: Fear &amp; Greed, Aktien: VIX).</p>
     <ul>
       <li><b>Long</b> ab Score +${c.buyThreshold}, <b>Short</b> ab ${c.shortThreshold}. Long schließt bei ${c.sellThreshold}, Short bei +${c.coverThreshold}.</li>
       <li><b>Hebel</b> 1–${c.maxLeverage}x: je stärker das Signal, desto höher. Bei hoher Schwankung (über 4 % pro Tag) höchstens 3x, über 6 % höchstens 2x.</li>
@@ -382,5 +390,53 @@ window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() =
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => R.M && render());
 
+// ---------------------------------------------------------------- Live-Kurse (Krypto, alle 5 Sekunden)
+const KRAKEN_KEYS = { BTC: ['XBTEUR', 'XXBTZEUR'], ETH: ['ETHEUR', 'XETHZEUR'], XRP: ['XRPEUR', 'XXRPZEUR'], SOL: ['SOLEUR', 'SOLEUR'], DOGE: ['XDGEUR', 'XDGEUR'], ADA: ['ADAEUR', 'ADAEUR'], LINK: ['LINKEUR', 'LINKEUR'], AVAX: ['AVAXEUR', 'AVAXEUR'] };
+R.live = {};
+async function fetchLive(syms) {
+  try {
+    const r = await fetch(`https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${syms.join(',')}&tsyms=EUR`);
+    const j = await r.json();
+    if (!j.RAW) throw new Error('keine Daten');
+    return Object.fromEntries(syms.filter((s) => j.RAW[s] && j.RAW[s].EUR).map((s) => [s, { price: j.RAW[s].EUR.PRICE, ch1d: j.RAW[s].EUR.CHANGEPCT24HOUR }]));
+  } catch (e) {
+    const ks = syms.filter((s) => KRAKEN_KEYS[s]);
+    const r = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${ks.map((s) => KRAKEN_KEYS[s][0]).join(',')}`);
+    const j = await r.json();
+    return Object.fromEntries(ks.filter((s) => j.result && j.result[KRAKEN_KEYS[s][1]]).map((s) => {
+      const d = j.result[KRAKEN_KEYS[s][1]];
+      return [s, { price: +d.c[0], ch1d: null }];
+    }));
+  }
+}
+function applyLive() {
+  if (!R.M) return;
+  for (const [s, v] of Object.entries(R.live)) {
+    const a = R.M.assets[s];
+    if (!a || v.t < R.M.updatedAt) continue;
+    a.price = v.price;
+    if (v.ch1d != null) a.ch1d = v.ch1d;
+  }
+}
+async function liveTick() {
+  if (document.hidden || !R.M) return;
+  const syms = Object.keys(R.M.assets).filter((s) => R.M.assets[s].type === 'crypto');
+  try {
+    const got = await fetchLive(syms);
+    const t = Date.now();
+    for (const [s, v] of Object.entries(got)) R.live[s] = { ...v, t };
+    if (!Object.keys(got).length) return;
+    R.liveAt = t;
+    applyLive();
+    renderDepot(true);
+    renderPositions();
+    renderTreemap();
+    renderUpdated();
+    const dot = $('liveDot');
+    if (dot) { dot.hidden = false; dot.classList.remove('pulse'); void dot.offsetWidth; dot.classList.add('pulse'); }
+  } catch (e) { /* nächster Versuch in 5 s */ }
+}
+
 load();
 setInterval(load, REFRESH_MS);
+setInterval(liveTick, LIVE_MS);
