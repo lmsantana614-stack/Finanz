@@ -1,0 +1,41 @@
+name: Trading-Bot
+
+on:
+  schedule:
+    - cron: '17 * * * *'   # jede Stunde (Minute 17)
+  workflow_dispatch:        # manuell starten: Actions -> Trading-Bot -> Run workflow
+
+permissions:
+  contents: write   # STATUS.md und bot/state.json speichern
+  issues: write     # Signale als Issue-Kommentar melden (-> Push-Benachrichtigung)
+
+concurrency:
+  group: trading-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Bot ausführen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRYPTOCOMPARE_KEY: ${{ secrets.CRYPTOCOMPARE_KEY }}
+        run: node bot/run.js
+      - name: Stand speichern
+        run: |
+          git config user.name "trading-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add STATUS.md bot/state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Bot-Update $(TZ=Europe/Berlin date '+%d.%m. %H:%M')"
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1

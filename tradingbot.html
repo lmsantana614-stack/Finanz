@@ -322,6 +322,9 @@ const COINS = {
   BNB: { name: 'BNB', gecko: 'binancecoin', aliases: ['bnb', 'binance coin'] },
 };
 
+// Kraken-Handelspaare in EUR
+const KRAKEN = { BTC: 'XBTEUR', ETH: 'ETHEUR', SOL: 'SOLEUR', XRP: 'XRPEUR', ADA: 'ADAEUR', DOGE: 'XDGEUR', AVAX: 'AVAXEUR', LINK: 'LINKEUR', DOT: 'DOTEUR' };
+
 const Data = {
   async getJSON(url, timeoutMs = 15000) {
     const ctrl = new AbortController();
@@ -347,7 +350,17 @@ const Data = {
       if (rows.length < 60) throw new Error('zu wenige Daten');
       return { rows, source: 'CryptoCompare' };
     } catch (e) {
-      // Fallback: CoinGecko (stündliche Auflösung bei 2–90 Tagen)
+      // Fallback 1: Kraken (bis 720 Stundenkerzen)
+      if (KRAKEN[sym]) {
+        try {
+          const j = await Data.getJSON(`https://api.kraken.com/0/public/OHLC?pair=${KRAKEN[sym]}&interval=60`);
+          const key = j.result && Object.keys(j.result).find((k) => k !== 'last');
+          if (!key) throw new Error((j.error || []).join(', ') || 'Kraken-Fehler');
+          const rows = j.result[key].map((d) => ({ t: d[0] * 1000, c: +d[4], h: +d[2], l: +d[3], v: +d[6] })).slice(-limit);
+          if (rows.length >= 60) return { rows, source: 'Kraken' };
+        } catch (e2) { /* weiter zu CoinGecko */ }
+      }
+      // Fallback 2: CoinGecko (stündliche Auflösung bei 2–90 Tagen)
       const days = Math.max(2, Math.min(90, Math.ceil(limit / 24)));
       const j = await Data.getJSON(
         `https://api.coingecko.com/api/v3/coins/${COINS[sym].gecko}/market_chart?vs_currency=eur&days=${days}`

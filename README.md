@@ -1,5 +1,7 @@
 # Finanz Trading-Bot
 
+**➡️ [Aktueller Stand des Bots: STATUS.md](STATUS.md)**
+
 Ein **Papier-Trading-Bot** als Webseite: Er startet mit **50 € virtuellem Guthaben**, analysiert laufend Kryptowährungen und sagt dir, **wann er was kaufen oder verkaufen würde** – auf Wunsch handelt er auch selbst (simuliert) und versucht, das Guthaben hochzutraden.
 
 > ⚠️ Es wird kein echtes Geld bewegt. Die Signale sind automatisch berechnet und **keine Anlageberatung**.
@@ -23,12 +25,23 @@ Alle Daten werden im Browser gespeichert (localStorage). Der Bot rechnet nur, **
 - **Lokal aus dem Repo**: `index.html` im Browser öffnen. Nach Änderungen an den Quelldateien mit `python3 build.py` die Einzeldatei neu bauen.
 - **Online über GitHub Pages**: Im Repo unter *Settings → Pages* bei *Source* „Deploy from a branch“, Branch `main` und Ordner `/ (root)` wählen. Die Seite liegt dann unter `https://lmsantana614-stack.github.io/Finanz/` und aktualisiert sich bei jedem Push auf `main`.
 
+## Automatischer Bot bei GitHub (läuft rund um die Uhr)
+
+Der Workflow `.github/workflows/trading-bot.yml` startet `bot/run.js` jede Stunde, mit derselben Strategie wie die Webseite. Er
+
+- handelt mit eigenen virtuellen 50 € (Stand in `bot/state.json`),
+- schreibt den aktuellen Stand nach [`STATUS.md`](STATUS.md),
+- meldet jeden Kauf, Verkauf und jedes neue Kaufsignal als Kommentar im Issue „🔔 Trading-Bot: Signale & Trades“. Weil du dort erwähnt wirst, bekommst du eine Push-Benachrichtigung in der GitHub-App.
+
+Manuell starten: *Actions → Trading-Bot → Run workflow*. Zurücksetzen auf 50 €: `bot/state.json` löschen.
+Auf einem privaten Repo verbraucht der Bot ca. 750 der 2.000 kostenlosen Actions-Minuten pro Monat.
+
 ## Datenquellen (kostenlos)
 
 | Was | Quelle |
 |---|---|
-| Kurse (stündlich, EUR) | CryptoCompare, Fallback CoinGecko |
-| News | CryptoCompare News |
+| Kurse (stündlich, EUR) | CryptoCompare, Fallback Kraken und CoinGecko |
+| News | CryptoCompare News, beim Bot zusätzlich RSS von CoinDesk, Cointelegraph, Decrypt |
 | Marktstimmung | alternative.me Fear & Greed Index |
 
 Für höhere Abruflimits kann in den Einstellungen ein kostenloser CryptoCompare-API-Key eingetragen werden. Sind die APIs nicht erreichbar, schaltet die Seite in einen Demo-Modus mit simulierten Kursen und handelt dann nicht.
